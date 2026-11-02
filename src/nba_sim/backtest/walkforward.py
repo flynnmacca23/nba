@@ -318,11 +318,11 @@ def _grade(game, result) -> list[dict]:
         fair_home, fair_away = devig_american([ml_home, ml_away])
         home_won = float(game.home_score) > float(game.away_score)
         if home_win - fair_home >= (1 - home_win) - fair_away and home_win - fair_home > 0.02:
-            rows.append({**base, **_bet("moneyline", home_win, home_won, ml_home)})
+            rows.append({**base, **_bet("moneyline", home_win, home_won, ml_home), "market_prob": fair_home})
         elif (1 - home_win) - fair_away > 0.02:
-            rows.append({**base, **_bet("moneyline", 1 - home_win, not home_won, ml_away)})
+            rows.append({**base, **_bet("moneyline", 1 - home_win, not home_won, ml_away), "market_prob": fair_away})
         else:
-            rows.append({**base, **_watch("moneyline", home_win, home_won)})
+            rows.append({**base, **_watch("moneyline", home_win, home_won), "market_prob": fair_home})
     spread = _num(game.home_spread)
     if spread is not None:
         cover = float(np.mean((home - away + spread) > 0) + 0.5 * np.mean((home - away + spread) == 0))
@@ -433,8 +433,15 @@ def _metrics(frame: pd.DataFrame) -> dict:
         rows = frame[frame["bet_market"] == market]
         settled = rows.loc[rows["won"].notna()]
         bets = settled[settled["bet"] == True] if "bet" in settled.columns else settled.iloc[0:0]  # noqa: E712
+        baseline = settled.loc[settled["market_prob"].notna()] if "market_prob" in settled else settled.iloc[0:0]
         output[market] = {
             "n": int(len(bets)),
+            "market_log_loss": None if baseline.empty else log_loss(baseline["market_prob"], baseline["won"]),
+            "market_brier": None if baseline.empty else brier(baseline["market_prob"], baseline["won"]),
+            "brier_improvement_vs_market": None if baseline.empty else (
+                brier(baseline["market_prob"], baseline["won"])
+                - brier(baseline["model_prob"], baseline["won"])
+            ),
             "n_unpriced": int(rows["price_status"].eq("missing").sum()) if "price_status" in rows else 0,
             "n_pushes": int(rows["settlement"].eq("push").sum()) if "settlement" in rows else 0,
             "log_loss": None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
