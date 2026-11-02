@@ -804,6 +804,7 @@ def _template_player(member: dict, team: TeamModel, league: LeaguePriors, minute
         dreb_pct=dreb,
         espn_id=espn_id,
         minutes_source="Depth chart",
+        foul_rate=0.08,
         minutes_base=minutes,
     )
 
