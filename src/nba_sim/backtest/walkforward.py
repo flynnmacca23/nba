@@ -122,10 +122,10 @@ def _default_lines_path() -> Path | None:
 
 
 def _pregame_ratings(lines: pd.DataFrame) -> pd.DataFrame:
-    """Fit each date's predictions using results from strictly earlier dates.
+    """Predict an entire day's slate before learning any result from that day.
 
-    Games on the same date are a single batch: their final scores cannot
-    influence another game's pregame rating, regardless of CSV row order.
+    Same-day outcomes are pooled into commutative updates. This prevents CSV
+    ordering from changing either the current slate or the following day.
     """
     strength: dict[str, float] = {}
     scoring: dict[str, float] = {}
@@ -133,9 +133,13 @@ def _pregame_ratings(lines: pd.DataFrame) -> pd.DataFrame:
     rows = []
     ordered = lines.copy()
     ordered["_rating_date"] = pd.to_datetime(ordered["date"]).dt.normalize()
+    if ordered["_rating_date"].isna().any():
+        raise ValueError("Backtest contains an invalid game date")
     ordered = ordered.sort_values("_rating_date", kind="stable")
     for _, day in ordered.groupby("_rating_date", sort=True):
-        updates = []
+        strength_delta: dict[str, float] = {}
+        score_observations: dict[str, list[float]] = {}
+        hca_residuals = []
         for game in day.drop(columns=["_rating_date"]).itertuples(index=False):
             home, away = game.home, game.away
             hs = strength.get(home, 0.0)
@@ -156,23 +160,29 @@ def _pregame_ratings(lines: pd.DataFrame) -> pd.DataFrame:
                     "moneyline_away": game.moneyline_away,
                     "pred_margin": pred_margin,
                     "pred_total": ht + at,
+                    **{
+                        name: getattr(game, name, None)
+                        for name in (
+                            "spread_home_american", "spread_away_american",
+                            "total_over_american", "total_under_american",
+                        )
+                    },
                 }
             )
-            margin = float(game.home_score) - float(game.away_score)
-            updates.append((home, away, hs, aws, ht, at, margin, pred_margin))
-        # Only after every game on the date has been predicted may its
-        # results update the state for subsequent dates.
-        for home, away, hs, aws, ht, at, margin, pred_margin in updates:
+            home_score = float(game.home_score)
+            away_score = float(game.away_score)
+            margin = home_score - away_score
             err = margin - pred_margin
-            strength[home] = hs + 0.12 * err
-            strength[away] = aws - 0.12 * err
-            # Scoring updates use the actual scores from the matching row.
-        for game in day.itertuples(index=False):
-            home, away = game.home, game.away
-            scoring[home] = 0.9 * scoring.get(home, 112.0) + 0.1 * float(game.home_score)
-            scoring[away] = 0.9 * scoring.get(away, 112.0) + 0.1 * float(game.away_score)
-        for home, away, hs, aws, ht, at, margin, pred_margin in updates:
-            hca = 0.98 * hca + 0.02 * (margin - (hs - aws))
+            strength_delta[home] = strength_delta.get(home, 0.0) + 0.12 * err
+            strength_delta[away] = strength_delta.get(away, 0.0) - 0.12 * err
+            score_observations.setdefault(home, []).append(home_score)
+            score_observations.setdefault(away, []).append(away_score)
+            hca_residuals.append(margin - (hs - aws))
+        for team, delta in strength_delta.items():
+            strength[team] = strength.get(team, 0.0) + delta
+        for team, scores in score_observations.items():
+            scoring[team] = 0.9 * scoring.get(team, 112.0) + 0.1 * float(np.mean(scores))
+        hca = 0.98 * hca + 0.02 * float(np.mean(hca_residuals))
     return pd.DataFrame(rows)
 
 
