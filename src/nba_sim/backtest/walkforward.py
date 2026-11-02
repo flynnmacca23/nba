@@ -45,15 +45,65 @@ def empty_player_props(lines: pd.DataFrame | None = None) -> dict:
 
 
 def _score_ready_props(props: pd.DataFrame) -> dict:
-    prob = props["model_prob"].to_numpy(dtype=float)
-    outcome = props["outcome"].to_numpy(dtype=float)
+    """Score only settled props with auditable pregame source timestamps."""
+    required = (
+        "game_id", "source", "snapshot_id", "model_version",
+        "available_at", "prediction_at", "game_start_at",
+    )
+    missing = [column for column in required if column not in props.columns]
+    reason = None
+    if missing:
+        reason = f"Missing prop provenance columns: {', '.join(missing)}"
+    else:
+        for column in ("game_id", "source", "snapshot_id", "model_version"):
+            if props[column].isna().any() or props[column].astype(str).str.strip().eq("").any():
+                reason = f"Missing prop identity: {column}"
+                break
+    if reason is None:
+        times = {}
+        for column in ("available_at", "prediction_at", "game_start_at"):
+            values = []
+            for value in props[column]:
+                try:
+                    stamp = pd.Timestamp(value)
+                except (TypeError, ValueError, OverflowError):
+                    reason = f"Invalid prop timestamp: {column}"
+                    break
+                if pd.isna(stamp) or stamp.tzinfo is None:
+                    reason = f"Prop timestamp must be timezone-aware: {column}"
+                    break
+                values.append(stamp.tz_convert("UTC"))
+            if reason is not None:
+                break
+            times[column] = pd.DatetimeIndex(values)
+        if reason is None and (
+            (times["available_at"] > times["prediction_at"]).any()
+            or (times["prediction_at"] >= times["game_start_at"]).any()
+        ):
+            reason = "Prop prices or predictions were not available before tipoff"
+    prob = pd.to_numeric(props["model_prob"], errors="coerce").to_numpy(dtype=float)
+    outcome = pd.to_numeric(props["outcome"], errors="coerce").to_numpy(dtype=float)
+    if reason is None and (
+        not np.isfinite(prob).all() or not np.isfinite(outcome).all()
+        or ((prob < 0) | (prob > 1)).any()
+        or (~np.isin(outcome, [0.0, 1.0])).any()
+    ):
+        reason = "Prop probabilities must be in [0,1] and settled outcomes must be binary"
+    if reason is not None:
+        return {
+            "status": "unevaluable",
+            "market": "player_props",
+            "n_bets": 0,
+            "n_rows": int(len(props)),
+            "message": reason,
+        }
     return {
         "status": "ok",
         "market": "player_props",
         "n_bets": int(len(props)),
         "log_loss": log_loss(prob, outcome),
         "brier": brier(prob, outcome),
-        "message": "Scored from stored model probabilities and settled outcomes.",
+        "message": "Scored from timestamped pregame probabilities and settled outcomes.",
     }
 
 
