@@ -439,7 +439,7 @@ def _measured_with_prior(
             "tov": mix("tov", 0.12),
             "ft": mix("ft", 0.08),
             "fg": mix("fg", 0.46),
-            # Count current games only so the clock sample ages with this season.
+            # Pool the exposure window across both seasons for per-game rates.
             "gp": float(new.get("gp") or 0) + float(old.get("gp") or 0),
         }
     return pooled
