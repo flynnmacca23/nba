@@ -122,41 +122,57 @@ def _default_lines_path() -> Path | None:
 
 
 def _pregame_ratings(lines: pd.DataFrame) -> pd.DataFrame:
+    """Fit each date's predictions using results from strictly earlier dates.
+
+    Games on the same date are a single batch: their final scores cannot
+    influence another game's pregame rating, regardless of CSV row order.
+    """
     strength: dict[str, float] = {}
     scoring: dict[str, float] = {}
     hca = 2.2
     rows = []
-    ordered = lines.sort_values("date")
-    for game in ordered.itertuples(index=False):
-        home, away = game.home, game.away
-        hs = strength.get(home, 0.0)
-        aws = strength.get(away, 0.0)
-        ht = scoring.get(home, 112.0)
-        at = scoring.get(away, 112.0)
-        pred_margin = hs - aws + hca
-        pred_total = ht + at
-        rows.append(
-            {
-                "date": game.date,
-                "home": home,
-                "away": away,
-                "home_score": game.home_score,
-                "away_score": game.away_score,
-                "home_spread": game.home_spread,
-                "total": game.total,
-                "moneyline_home": game.moneyline_home,
-                "moneyline_away": game.moneyline_away,
-                "pred_margin": pred_margin,
-                "pred_total": pred_total,
-            }
-        )
-        margin = float(game.home_score) - float(game.away_score)
-        err = margin - pred_margin
-        strength[home] = hs + 0.12 * err
-        strength[away] = aws - 0.12 * err
-        scoring[home] = 0.9 * ht + 0.1 * float(game.home_score)
-        scoring[away] = 0.9 * at + 0.1 * float(game.away_score)
-        hca = 0.98 * hca + 0.02 * (margin - (hs - aws))
+    ordered = lines.copy()
+    ordered["_rating_date"] = pd.to_datetime(ordered["date"]).dt.normalize()
+    ordered = ordered.sort_values("_rating_date", kind="stable")
+    for _, day in ordered.groupby("_rating_date", sort=True):
+        updates = []
+        for game in day.drop(columns=["_rating_date"]).itertuples(index=False):
+            home, away = game.home, game.away
+            hs = strength.get(home, 0.0)
+            aws = strength.get(away, 0.0)
+            ht = scoring.get(home, 112.0)
+            at = scoring.get(away, 112.0)
+            pred_margin = hs - aws + hca
+            rows.append(
+                {
+                    "date": game.date,
+                    "home": home,
+                    "away": away,
+                    "home_score": game.home_score,
+                    "away_score": game.away_score,
+                    "home_spread": game.home_spread,
+                    "total": game.total,
+                    "moneyline_home": game.moneyline_home,
+                    "moneyline_away": game.moneyline_away,
+                    "pred_margin": pred_margin,
+                    "pred_total": ht + at,
+                }
+            )
+            margin = float(game.home_score) - float(game.away_score)
+            updates.append((home, away, hs, aws, ht, at, margin, pred_margin))
+        # Only after every game on the date has been predicted may its
+        # results update the state for subsequent dates.
+        for home, away, hs, aws, ht, at, margin, pred_margin in updates:
+            err = margin - pred_margin
+            strength[home] = hs + 0.12 * err
+            strength[away] = aws - 0.12 * err
+            # Scoring updates use the actual scores from the matching row.
+        for game in day.itertuples(index=False):
+            home, away = game.home, game.away
+            scoring[home] = 0.9 * scoring.get(home, 112.0) + 0.1 * float(game.home_score)
+            scoring[away] = 0.9 * scoring.get(away, 112.0) + 0.1 * float(game.away_score)
+        for home, away, hs, aws, ht, at, margin, pred_margin in updates:
+            hca = 0.98 * hca + 0.02 * (margin - (hs - aws))
     return pd.DataFrame(rows)
 
 
