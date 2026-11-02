@@ -466,3 +466,21 @@ def test_this_season_lineups_count_more_and_a_short_group_stays_behind():
     trust = 40.0 / 76.0
     assert pace[last] == pytest.approx((1.0 - trust) * 100 + trust * 112)
     assert pace[last] > 106
+
+
+def test_same_day_results_never_affect_other_pregame_ratings():
+    from nba_sim.backtest.walkforward import _pregame_ratings
+
+    base = {
+        "date": "2026-01-02", "home_spread": -2.5, "total": 220,
+        "moneyline_home": -130, "moneyline_away": 110,
+    }
+    first = {**base, "home": "den", "away": "mia", "home_score": 180, "away_score": 90}
+    second = {**base, "home": "den", "away": "bos", "home_score": 100, "away_score": 101}
+    games = pd.DataFrame([first, second])
+    rated = _pregame_ratings(games)
+    assert rated["pred_margin"].tolist() == pytest.approx([2.2, 2.2])
+    assert rated["pred_total"].tolist() == pytest.approx([224.0, 224.0])
+    reversed_rated = _pregame_ratings(games.iloc[::-1])
+    assert reversed_rated["pred_margin"].tolist() == pytest.approx([2.2, 2.2])
+    assert reversed_rated["pred_total"].tolist() == pytest.approx([224.0, 224.0])
