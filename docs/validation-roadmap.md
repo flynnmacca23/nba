@@ -26,6 +26,41 @@ This is an implementation tracker, **not** a claim of predictive validity.
 - [ ] Minutes and injury scenario validation
 - [ ] Run CI and reproduce independent out-of-sample benchmarks
 
+## Validation progress (2026-11-03)
+
+- Walk-forward team ratings are computed for the entire game date before any
+  same-day final score is learned. Updates to team strength, scoring and
+  home-court advantage are order-independent across games on that date.
+- Availability filtering rejects timezone-naive/date-only source timestamps.
+  Snapshot manifests require explicit observation, availability and prediction
+  timestamps and stable identities. These checks are **not yet integrated with
+  every ingestion path**.
+- Historical spread/total returns are only computed when side-specific American
+  odds are actually stored. Missing prices remain unpriced forecasts, not
+  hypothetical -110 bets. Spread and total pushes are ungraded for binary
+  calibration and cannot be treated as losses.
+- Archived player props with stored probabilities/outcomes are scored only if
+  source, snapshot and pregame timing metadata are present and consistent.
+  This is a metadata gate, not proof that the original prediction pipeline
+  was leak-free.
+- The existing team-market walk-forward still constructs synthetic five-player
+  teams. Its output now declares `synthetic_team_only` and
+  `unverified_historical_lines`. It is **diagnostic only**, not an
+  independently validated betting-performance claim.
+
+### Required next gates
+
+1. Persist real pregame source payloads and replay real-player `GameSpec`
+   instances from those immutable snapshots; do not rebuild historical games
+   from today's corrected warehouse.
+2. Capture bookmaker/market/side prices with observed and available timestamps
+   and evaluate actual recorded executable prices rather than assumed closes.
+3. Create a settled player-prop archive with independent box-score outcomes,
+   held-out calibration and forecast-error metrics.
+4. Validate injury/minutes scenarios and 240-minute team totals against
+   historical games; benchmark simulation speed, memory and deterministic seeds.
+5. Require green CI and out-of-sample release gates before considering a merge.
+
 ## Data requirements
 
 Archive raw source payloads with `source`, `observed_at`, `available_at`,
