@@ -69,3 +69,22 @@ def test_snapshot_manifest_rejects_future_or_duplicate_sources():
     rows = pd.concat([_manifest(), _manifest()], ignore_index=True)
     with pytest.raises(ValueError, match="Duplicate"):
         validate_snapshot_manifest(rows)
+
+
+def test_available_as_of_rejects_naive_and_date_only_source_times():
+    rows = pd.DataFrame({
+        "available_at": ["2026-10-22", "2026-10-22T10:00:00", "2026-10-22T10:00:00+11:00"]
+    })
+    with pytest.raises(ValueError, match="invalid availability"):
+        available_as_of(rows, "2026-10-22T11:00:00Z")
+    selected = available_as_of(rows, "2026-10-22T11:00:00Z", strict=False)
+    assert selected.index.tolist() == [2]
+
+
+def test_available_as_of_converts_explicit_offsets_to_utc():
+    rows = pd.DataFrame({"available_at": [
+        "2026-10-22T21:00:00+11:00",
+        "2026-10-22T23:00:00+11:00",
+    ]})
+    selected = available_as_of(rows, "2026-10-22T11:00:00Z")
+    assert selected.index.tolist() == [0]
