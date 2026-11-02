@@ -544,3 +544,15 @@ def test_player_prop_scoring_accepts_verified_timing_and_rejects_late_prices():
     assert empty_player_props(props)["status"] == "unevaluable"
     props.loc[0, "available_at"] = "2026-01-02T17:00:00"
     assert empty_player_props(props)["status"] == "unevaluable"
+
+
+def test_historical_simulation_seed_is_stable_across_order_and_processes():
+    from types import SimpleNamespace
+    from nba_sim.backtest.walkforward import _game_seed
+
+    game = SimpleNamespace(date="2026-01-02", home="den", away="mia")
+    other = SimpleNamespace(date="2026-01-02", home="bos", away="mia")
+    assert _game_seed(17, game) == _game_seed(17, game)
+    assert _game_seed(17, game) != _game_seed(17, other)
+    assert _game_seed(17, game) != _game_seed(18, game)
+    assert 0 <= _game_seed(17, game) < 2**32
