@@ -399,7 +399,7 @@ def _measured_with_prior(
             name,
             _previous_season(season),
             depth - 1,
-            role_flip=role_flip,
+            role_flip=False,  # No current-season evidence for a role change.
             current_weight=current_weight,
             solo_threshold=solo_threshold,
         )
