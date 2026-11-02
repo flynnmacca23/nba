@@ -104,6 +104,15 @@ def parse_kaggle(frame: pd.DataFrame) -> pd.DataFrame:
             "moneyline_away": pd.to_numeric(data.get("moneyline_away"), errors="coerce"),
         }
     )
+    # Historical files often contain only a line and no executable price.
+    # Preserve side-specific odds only when the source explicitly provides them;
+    # never synthesize -110 for spread/total return calculations.
+    for column in (
+        "spread_home_american", "spread_away_american",
+        "total_over_american", "total_under_american",
+    ):
+        if column in data.columns:
+            parsed[column] = pd.to_numeric(data[column], errors="coerce")
     return parsed.dropna(subset=["date", "home", "away", "home_score", "away_score"])
 
 
