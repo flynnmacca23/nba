@@ -7,6 +7,7 @@ empty result until a settled prop file is stored.
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -139,9 +140,9 @@ def run_backtest(
     rated = _pregame_ratings(lines)
     window = rated.tail(last_n)
     bets = []
-    for index, game in enumerate(window.itertuples(index=False)):
+    for game in window.itertuples(index=False):
         spec = _composite_spec(game)
-        result = simulate_game(spec, n_sims=n_sims, seed=seed + index)
+        result = simulate_game(spec, n_sims=n_sims, seed=_game_seed(seed, game))
         bets.extend(_grade(game, result))
     frame = pd.DataFrame(bets)
     n_games = 0
@@ -165,6 +166,17 @@ def run_backtest(
         "player_props": empty_player_props(lines if "market" in lines.columns else None),
         "bets": frame.to_dict("records"),
     }
+
+
+def _game_seed(seed: int, game) -> int:
+    """Stable per-game simulation seed, independent of CSV ordering.
+
+    Python's built-in hash is randomized between processes, so use a stable
+    digest of the game identity instead.
+    """
+    identity = f"{str(game.date)[:10]}|{game.home}|{game.away}".encode("utf-8")
+    digest = hashlib.sha256(identity).digest()
+    return (int(seed) + int.from_bytes(digest[:8], "big")) % (2**32)
 
 
 def _default_lines_path() -> Path | None:
