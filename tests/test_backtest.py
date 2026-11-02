@@ -484,3 +484,34 @@ def test_same_day_results_never_affect_other_pregame_ratings():
     reversed_rated = _pregame_ratings(games.iloc[::-1])
     assert reversed_rated["pred_margin"].tolist() == pytest.approx([2.2, 2.2])
     assert reversed_rated["pred_total"].tolist() == pytest.approx([224.0, 224.0])
+
+
+def test_next_day_ratings_are_independent_of_same_day_row_order():
+    from nba_sim.backtest.walkforward import _pregame_ratings
+
+    base = {
+        "home_spread": -2.5, "total": 220,
+        "moneyline_home": -130, "moneyline_away": 110,
+    }
+    first = {**base, "date": "2026-01-02", "home": "den", "away": "mia",
+             "home_score": 180, "away_score": 90}
+    second = {**base, "date": "2026-01-02", "home": "den", "away": "bos",
+              "home_score": 100, "away_score": 101}
+    tomorrow = {**base, "date": "2026-01-03", "home": "den", "away": "bos",
+                "home_score": 99, "away_score": 98}
+    forward = _pregame_ratings(pd.DataFrame([first, second, tomorrow]))
+    reversed_day = _pregame_ratings(pd.DataFrame([second, first, tomorrow]))
+    assert forward.iloc[-1]["pred_margin"] == pytest.approx(reversed_day.iloc[-1]["pred_margin"])
+    assert forward.iloc[-1]["pred_total"] == pytest.approx(reversed_day.iloc[-1]["pred_total"])
+    assert forward.iloc[-1]["pred_margin"] != pytest.approx(2.2)
+
+
+def test_invalid_game_dates_fail_instead_of_disappearing_from_backtest():
+    from nba_sim.backtest.walkforward import _pregame_ratings
+
+    with pytest.raises(ValueError, match="invalid game date"):
+        _pregame_ratings(pd.DataFrame([{
+            "date": None, "home": "den", "away": "mia", "home_score": 110,
+            "away_score": 100, "home_spread": -3, "total": 220,
+            "moneyline_home": -140, "moneyline_away": 120,
+        }]))
