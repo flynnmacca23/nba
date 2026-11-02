@@ -152,6 +152,11 @@ def run_backtest(
         "status": "ok",
         "message": f"Walk-forward on the last {n_games} games with ratings fit only on earlier games.",
         "n_games": n_games,
+        "validation": {
+            "replay": "synthetic_team_only",
+            "input_provenance": "unverified_historical_lines",
+            "claim": "Diagnostic backtest only; not a point-in-time full-player replay.",
+        },
         "metrics": _metrics(frame),
         "calibration": calibration_table(
             settled_ml["model_prob"] if "model_prob" in settled_ml else [],
