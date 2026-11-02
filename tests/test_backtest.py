@@ -251,6 +251,8 @@ def test_walk_forward_scores_team_markets_and_leaves_props_empty():
     assert set(result["metrics"]) >= {"moneyline", "spread", "total", "note"}
     assert result["player_props"]["status"] == "empty"
     assert result["metrics"]["moneyline"]["log_loss"] is not None
+    assert result["validation"]["replay"] == "synthetic_team_only"
+    assert result["validation"]["input_provenance"] == "unverified_historical_lines"
 
 
 def test_a_players_own_pick_and_roll_sample_survives_shrinkage():
