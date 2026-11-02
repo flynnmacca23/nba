@@ -1,7 +1,7 @@
 """Point-in-time checks for historical prediction inputs.
 
-A date-only snapshot is conservatively treated as available at the end of that
-day; intraday availability must be represented by an explicit timestamp.
+Date-only or timezone-naive values are not evidence of availability and are
+rejected. Historical replay requires an explicit timezone-aware timestamp.
 """
 from __future__ import annotations
 
@@ -26,7 +26,22 @@ def available_as_of(
     cutoff = pd.Timestamp(prediction_time)
     if cutoff.tzinfo is None:
         raise ValueError("prediction_time must include a timezone")
-    stamps = pd.to_datetime(frame[available_column], errors="coerce", utc=True)
+    # utc=True would silently interpret naive timestamps as UTC. That is not
+    # valid source provenance, so validate each value before UTC conversion.
+    def parse_stamp(value):
+        try:
+            stamp = pd.Timestamp(value)
+        except (TypeError, ValueError, OverflowError):
+            return pd.NaT
+        if pd.isna(stamp) or stamp.tzinfo is None:
+            return pd.NaT
+        return stamp.tz_convert("UTC")
+
+    stamps = pd.Series(
+        (parse_stamp(value) for value in frame[available_column]),
+        index=frame.index,
+        dtype="datetime64[ns, UTC]",
+    )
     if strict and stamps.isna().any():
         raise ValueError("Missing or invalid availability timestamps")
     mask = stamps.notna() & (stamps <= cutoff.tz_convert("UTC"))
