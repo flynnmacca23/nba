@@ -99,3 +99,20 @@ def test_parsed_historical_lines_keep_explicit_market_prices():
     parsed = parse_kaggle(raw)
     assert parsed.iloc[0]["spread_home_american"] == -115
     assert parsed.iloc[0]["total_over_american"] == -105
+
+
+def test_moneyline_market_baseline_is_aligned_to_the_predicted_side():
+    import pandas as pd
+    from nba_sim.markets.devig import devig_american
+
+    game = _game(224.5)
+    rows = _grade(game, _result())
+    moneyline = next(row for row in rows if row["bet_market"] == "moneyline")
+    fair_home, _ = devig_american([-180, 155])
+    assert moneyline["market_prob"] == fair_home
+    metrics = _metrics(pd.DataFrame(rows))
+    assert metrics["moneyline"]["market_brier"] is not None
+    assert metrics["moneyline"]["market_log_loss"] is not None
+    assert metrics["moneyline"]["brier_improvement_vs_market"] == (
+        metrics["moneyline"]["market_brier"] - metrics["moneyline"]["brier"]
+    )
