@@ -97,16 +97,15 @@ def run_backtest(
     n_games = 0
     if not frame.empty and {"date", "home", "away"}.issubset(frame.columns):
         n_games = int(frame.groupby(["date", "home", "away"]).ngroups)
+    settled_ml = frame.loc[frame["bet_market"].eq("moneyline") & frame["won"].notna()] if not frame.empty else frame
     return {
         "status": "ok",
         "message": f"Walk-forward on the last {n_games} games with ratings fit only on earlier games.",
         "n_games": n_games,
         "metrics": _metrics(frame),
         "calibration": calibration_table(
-            frame.loc[frame["bet_market"].eq("moneyline"), "model_prob"]
-            if "bet_market" in frame
-            else [],
-            frame.loc[frame["bet_market"].eq("moneyline"), "won"] if "bet_market" in frame else [],
+            settled_ml["model_prob"] if "model_prob" in settled_ml else [],
+            settled_ml["won"] if "won" in settled_ml else [],
         ),
         "player_props": empty_player_props(lines if "market" in lines.columns else None),
         "bets": frame.to_dict("records"),
@@ -331,11 +330,12 @@ def _metrics(frame: pd.DataFrame) -> dict:
         return output
     for market in ("moneyline", "spread", "total"):
         rows = frame[frame["bet_market"] == market]
-        bets = rows[rows["bet"] == True] if "bet" in rows.columns else rows.iloc[0:0]  # noqa: E712
+        settled = rows.loc[rows["won"].notna()]
+        bets = settled[settled["bet"] == True] if "bet" in settled.columns else settled.iloc[0:0]  # noqa: E712
         output[market] = {
             "n": int(len(bets)),
-            "log_loss": None if rows.empty else log_loss(rows["model_prob"], rows["won"]),
-            "brier": None if rows.empty else brier(rows["model_prob"], rows["won"]),
+            "log_loss": None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
+            "brier": None if settled.empty else brier(settled["model_prob"], settled["won"]),
             "roi": None if bets.empty else flat_roi(bets["won"].astype(bool), bets["decimal_odds"]),
             "drawdown": None if bets.empty else max_drawdown(bets["profit"]),
             "clv": closing_line_value([], []),
