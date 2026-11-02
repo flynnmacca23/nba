@@ -1084,7 +1084,8 @@ def _hygiene_current_slate_minutes(players: list[PlayerModel], on: date) -> None
     """
     if not _is_current_slate(on):
         return
-    if len(players) >= 5:\n        _cap_unsampled_minutes(players, cap=6.0)
+    if len(players) >= 5:
+        _cap_unsampled_minutes(players, cap=6.0)
     _rescale_available_to_240(players, only_if_over=280.0, protect_stars=True)
 
 
@@ -2521,7 +2522,13 @@ def _chart_on_night(
             # After a team has STOD log appearances, drop chart-only phantoms
             # (no matched id / no stint). Opening night before any logs still
             # keeps the depth chart.
-            # Keep an unobserved chart player until there is evidence of a\n            # later stint elsewhere. A rookie may have no NBA log yet.\n            if player_id is not None and player_id in by_player:\n                continue\n            if player_id is None and team in teams_with_logs:\n                continue\n            kept.append(row)
+            # Keep an unobserved chart player until there is evidence of a
+            # later stint elsewhere. A rookie may have no NBA log yet.
+            if player_id is not None and player_id in by_player:
+                continue
+            if player_id is None and team in teams_with_logs:
+                continue
+            kept.append(row)
             continue
         mine = [item for item in by_player[player_id] if item[0] == team]
         others = [item for item in by_player[player_id] if item[0] != team]
