@@ -440,7 +440,7 @@ def _measured_with_prior(
             "ft": mix("ft", 0.08),
             "fg": mix("fg", 0.46),
             # Count current games only so the clock sample ages with this season.
-            "gp": float(new.get("gp") or 0),
+            "gp": float(new.get("gp") or 0) + float(old.get("gp") or 0),
         }
     return pooled
 
