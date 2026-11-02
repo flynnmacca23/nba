@@ -382,7 +382,7 @@ def _metrics(frame: pd.DataFrame) -> dict:
             "n": int(len(bets)),
             "n_unpriced": int(rows["price_status"].eq("missing").sum()) if "price_status" in rows else 0,
             "n_pushes": int(rows["settlement"].eq("push").sum()) if "settlement" in rows else 0,
-            "log_loss: None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
+            "log_loss": None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
             "brier": None if settled.empty else brier(settled["model_prob"], settled["won"]),
             "roi": None if bets.empty else flat_roi(bets["won"].astype(bool), bets["decimal_odds"]),
             "drawdown": None if bets.empty else max_drawdown(bets["profit"]),
