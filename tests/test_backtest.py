@@ -515,3 +515,30 @@ def test_invalid_game_dates_fail_instead_of_disappearing_from_backtest():
             "away_score": 100, "home_spread": -3, "total": 220,
             "moneyline_home": -140, "moneyline_away": 120,
         }]))
+
+
+def test_player_prop_scoring_requires_pregame_provenance():
+    props = pd.DataFrame([{"market": "player_points", "model_prob": 0.7, "outcome": 1}])
+    result = empty_player_props(props)
+    assert result["status"] == "unevaluable"
+    assert result["n_bets"] == 0
+    assert "provenance" in result["message"]
+
+
+def test_player_prop_scoring_accepts_verified_timing_and_rejects_late_prices():
+    props = pd.DataFrame([{
+        "market": "player_points", "game_id": "g1", "source": "archived_book",
+        "snapshot_id": "s1", "model_version": "v1",
+        "available_at": "2026-01-02T17:00:00Z",
+        "prediction_at": "2026-01-02T17:10:00Z",
+        "game_start_at": "2026-01-02T18:00:00Z",
+        "model_prob": 0.7, "outcome": 1,
+    }])
+    scored = empty_player_props(props)
+    assert scored["status"] == "ok"
+    assert scored["n_bets"] == 1
+    assert scored["brier"] == pytest.approx(0.09)
+    props.loc[0, "available_at"] = "2026-01-02T17:30:00Z"
+    assert empty_player_props(props)["status"] == "unevaluable"
+    props.loc[0, "available_at"] = "2026-01-02T17:00:00"
+    assert empty_player_props(props)["status"] == "unevaluable"
