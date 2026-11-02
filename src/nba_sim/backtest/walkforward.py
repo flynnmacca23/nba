@@ -258,7 +258,11 @@ def _grade(game, result) -> list[dict]:
     total_line = _num(game.total)
     if total_line is not None:
         over = float(np.mean(total > total_line) + 0.5 * np.mean(total == total_line))
-        actual_over = float(game.home_score) + float(game.away_score) > total_line
+        actual_points = float(game.home_score) + float(game.away_score)
+        if actual_points == total_line:
+            rows.append({**base, **_push("total", over)})
+            return rows
+        actual_over = actual_points > total_line
         if over - 0.5 > 0.03:
             rows.append({**base, **_bet("total", over, actual_over, -110)})
         elif 0.5 - over > 0.03:
@@ -266,6 +270,21 @@ def _grade(game, result) -> list[dict]:
         else:
             rows.append({**base, **_watch("total", over, actual_over)})
     return rows
+
+
+def _push(market: str, prob: float) -> dict:
+    """A settled push returns the stake and is excluded from binary calibration."""
+    return {
+        "bet_market": market,
+        "model_prob": prob,
+        "won": np.nan,
+        "decimal_odds": np.nan,
+        "profit": 0.0,
+        "american": np.nan,
+        "implied": np.nan,
+        "bet": False,
+        "settlement": "push",
+    }
 
 
 def _watch(market: str, prob: float, won: bool) -> dict:
