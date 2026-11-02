@@ -257,8 +257,8 @@ def _grade(game, result) -> list[dict]:
         "away_score": game.away_score,
     }
     rows = []
-    ml_home = _num(game.moneyline_home)
-    ml_away = _num(game.moneyline_away)
+    ml_home = _recorded_price(game.moneyline_home)
+    ml_away = _recorded_price(game.moneyline_away)
     if ml_home is not None and ml_away is not None:
         fair_home, fair_away = devig_american([ml_home, ml_away])
         home_won = float(game.home_score) > float(game.away_score)
@@ -273,11 +273,15 @@ def _grade(game, result) -> list[dict]:
         cover = float(np.mean((home - away + spread) > 0) + 0.5 * np.mean((home - away + spread) == 0))
         margin = float(game.home_score) - float(game.away_score) + spread
         if margin == 0:
-            rows.append({**base, **_watch("spread", cover, False)})
+            rows.append({**base, **_push("spread", cover)})
         elif cover - 0.5 > 0.03:
-            rows.append({**base, **_bet("spread", cover, margin > 0, -110)})
+            price = _recorded_price(getattr(game, "spread_home_american", None))
+            selection = _bet("spread", cover, margin > 0, price) if price is not None else _unpriced("spread", cover, margin > 0)
+            rows.append({**base, **selection})
         elif 0.5 - cover > 0.03:
-            rows.append({**base, **_bet("spread", 1 - cover, margin < 0, -110)})
+            price = _recorded_price(getattr(game, "spread_away_american", None))
+            selection = _bet("spread", 1 - cover, margin < 0, price) if price is not None else _unpriced("spread", 1 - cover, margin < 0)
+            rows.append({**base, **selection})
         else:
             rows.append({**base, **_watch("spread", cover, margin > 0)})
     total_line = _num(game.total)
@@ -289,12 +293,27 @@ def _grade(game, result) -> list[dict]:
             return rows
         actual_over = actual_points > total_line
         if over - 0.5 > 0.03:
-            rows.append({**base, **_bet("total", over, actual_over, -110)})
+            price = _recorded_price(getattr(game, "total_over_american", None))
+            selection = _bet("total", over, actual_over, price) if price is not None else _unpriced("total", over, actual_over)
+            rows.append({**base, **selection})
         elif 0.5 - over > 0.03:
-            rows.append({**base, **_bet("total", 1 - over, not actual_over, -110)})
+            price = _recorded_price(getattr(game, "total_under_american", None))
+            selection = _bet("total", 1 - over, not actual_over, price) if price is not None else _unpriced("total", 1 - over, not actual_over)
+            rows.append({**base, **selection})
         else:
             rows.append({**base, **_watch("total", over, actual_over)})
     return rows
+
+
+def _recorded_price(value) -> float | None:
+    """Require a plausible, explicitly recorded American price."""
+    price = _num(value)
+    return price if price is not None and (price <= -100 or price >= 100) else None
+
+
+def _unpriced(market: str, prob: float, won: bool) -> dict:
+    """Keep the forecast for calibration, but never fabricate betting returns."""
+    return {**_watch(market, prob, won), "price_status": "missing"}
 
 
 def _push(market: str, prob: float) -> dict:
@@ -337,6 +356,7 @@ def _bet(market: str, prob: float, won: bool, american: float) -> dict:
         "american": american,
         "implied": american_to_implied(american),
         "bet": True,
+        "price_status": "recorded",
     }
 
 
@@ -360,7 +380,9 @@ def _metrics(frame: pd.DataFrame) -> dict:
         bets = settled[settled["bet"] == True] if "bet" in settled.columns else settled.iloc[0:0]  # noqa: E712
         output[market] = {
             "n": int(len(bets)),
-            "log_loss": None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
+            "n_unpriced": int(rows["price_status"].eq("missing").sum()) if "price_status" in rows else 0,
+            "n_pushes": int(rows["settlement"].eq("push").sum()) if "settlement" in rows else 0,
+            "log_loss: None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
             "brier": None if settled.empty else brier(settled["model_prob"], settled["won"]),
             "roi": None if bets.empty else flat_roi(bets["won"].astype(bool), bets["decimal_odds"]),
             "drawdown": None if bets.empty else max_drawdown(bets["profit"]),
