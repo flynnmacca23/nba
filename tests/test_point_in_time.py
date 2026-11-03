@@ -88,3 +88,29 @@ def test_available_as_of_converts_explicit_offsets_to_utc():
     ]})
     selected = available_as_of(rows, "2026-10-22T11:00:00Z")
     assert selected.index.tolist() == [0]
+
+
+def test_replay_selects_latest_snapshot_per_game_and_source():
+    from nba_sim.backtest.point_in_time import replay_inputs_as_of
+
+    base = _manifest().iloc[0].to_dict()
+    older = {**base, "snapshot_id": "older",
+             "available_at": "2026-10-22T09:00:00Z"}
+    newer = {**base, "snapshot_id": "newer",
+             "available_at": "2026-10-22T10:30:00Z"}
+    other_source = {**base, "source": "roster", "snapshot_id": "roster"}
+    other_game = {**base, "game_id": "game-2", "snapshot_id": "game2"}
+    rows = pd.DataFrame([newer, other_game, older, other_source])
+    selected = replay_inputs_as_of(rows, "2026-10-22T11:00:00Z")
+    assert set(selected["snapshot_id"]) == {"newer", "roster", "game2"}
+    reversed_selected = replay_inputs_as_of(rows.iloc[::-1], "2026-10-22T11:00:00Z")
+    assert set(reversed_selected["snapshot_id"]) == set(selected["snapshot_id"])
+
+
+def test_replay_excludes_snapshots_for_later_prediction_cutoffs():
+    from nba_sim.backtest.point_in_time import replay_inputs_as_of
+
+    rows = _manifest()
+    rows.loc[0, "prediction_at"] = "2026-10-22T13:00:00Z"
+    assert replay_inputs_as_of(rows, "2026-10-22T12:00:00Z").empty
+    assert len(replay_inputs_as_of(rows, "2026-10-22T13:00:00Z")) == 1
