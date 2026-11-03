@@ -94,6 +94,27 @@ def validate_snapshot_manifest(manifest: pd.DataFrame) -> None:
 
 
 def replay_inputs_as_of(manifest: pd.DataFrame, prediction_time: str | pd.Timestamp) -> pd.DataFrame:
-    """Return only snapshots provably usable for a historical prediction."""
+    """Return the latest available snapshot per game and source at a cutoff.
+
+    A historical replay must not combine multiple revisions of the same
+    source. The snapshot's own prediction timestamp must also be no later
+    than the requested replay cutoff.
+    """
     validate_snapshot_manifest(manifest)
-    return available_as_of(manifest, prediction_time)
+    eligible = available_as_of(manifest, prediction_time)
+    eligible = available_as_of(
+        eligible, prediction_time, available_column="prediction_at"
+    )
+    if eligible.empty:
+        return eligible
+    # Stable sorting makes the tie-breaker deterministic when two snapshots
+    # have the same availability timestamp.
+    ordered = eligible.assign(
+        _available_utc=pd.to_datetime(eligible["available_at"], utc=True),
+        _prediction_utc=pd.to_datetime(eligible["prediction_at"], utc=True),
+    ).sort_values(
+        ["_available_utc", "_prediction_utc", "snapshot_id"],
+        kind="stable",
+    )
+    latest = ordered.drop_duplicates(["game_id", "source"], keep="last")
+    return latest.drop(columns=["_available_utc", "_prediction_utc"]).sort_index()
