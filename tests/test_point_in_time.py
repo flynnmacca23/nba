@@ -95,6 +95,7 @@ def test_replay_selects_latest_snapshot_per_game_and_source():
 
     base = _manifest().iloc[0].to_dict()
     older = {**base, "snapshot_id": "older",
+             "observed_at": "2026-10-22T08:55:00Z",
              "available_at": "2026-10-22T09:00:00Z"}
     newer = {**base, "snapshot_id": "newer",
              "available_at": "2026-10-22T10:30:00Z"}
