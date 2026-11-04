@@ -89,6 +89,23 @@ def validate_snapshot_manifest(manifest: pd.DataFrame) -> None:
         raise ValueError("Snapshot cannot be available before observation")
     if (timestamps["available_at"] > timestamps["prediction_at"]).any():
         raise ValueError("Snapshot became available after prediction cutoff")
+    # When tipoff is recorded, reject predictions made at or after tipoff.
+    # An as-of filter alone cannot detect a postgame snapshot with an
+    # internally consistent observation/availability/prediction timeline.
+    if "game_start_at" in manifest.columns:
+        raw = manifest["game_start_at"]
+        if raw.isna().any():
+            raise ValueError("Missing snapshot timestamp: game_start_at")
+        for value in raw:
+            try:
+                stamp = pd.Timestamp(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Invalid snapshot timestamp: game_start_at") from exc
+            if pd.isna(stamp) or stamp.tzinfo is None:
+                raise ValueError("Snapshot timestamp must be timezone-aware: game_start_at")
+        starts = pd.to_datetime(raw, utc=True, errors="raise")
+        if (timestamps["prediction_at"] >= starts).any():
+            raise ValueError("Snapshot prediction must precede game start")
     if manifest.duplicated(subset=["game_id", "source", "snapshot_id"]).any():
         raise ValueError("Duplicate snapshot identity")
 
