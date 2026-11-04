@@ -115,3 +115,25 @@ def test_replay_excludes_snapshots_for_later_prediction_cutoffs():
     rows.loc[0, "prediction_at"] = "2026-10-22T13:00:00Z"
     assert replay_inputs_as_of(rows, "2026-10-22T12:00:00Z").empty
     assert len(replay_inputs_as_of(rows, "2026-10-22T13:00:00Z")) == 1
+
+
+def test_snapshot_manifest_requires_predictions_before_tipoff():
+    from nba_sim.backtest.point_in_time import replay_inputs_as_of
+
+    rows = _manifest()
+    rows["game_start_at"] = "2026-10-22T12:00:00Z"
+    assert len(replay_inputs_as_of(rows, "2026-10-22T11:00:00Z")) == 1
+
+    rows.loc[0, "prediction_at"] = "2026-10-22T12:00:00Z"
+    with pytest.raises(ValueError, match="precede game start"):
+        replay_inputs_as_of(rows, "2026-10-22T13:00:00Z")
+
+
+@pytest.mark.parametrize("bad_start", [None, "2026-10-22", "2026-10-22T12:00:00", "not-a-time"])
+def test_snapshot_manifest_rejects_unverifiable_tipoff(bad_start):
+    from nba_sim.backtest.point_in_time import validate_snapshot_manifest
+
+    rows = _manifest()
+    rows["game_start_at"] = bad_start
+    with pytest.raises(ValueError, match="game_start_at"):
+        validate_snapshot_manifest(rows)
