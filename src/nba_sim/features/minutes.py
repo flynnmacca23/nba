@@ -104,8 +104,11 @@ def allocate_minutes(
         rng = np.random.default_rng(seed)
     n = len(players)
     available = np.array([p.available for p in players], dtype=bool)
+    # Never resurrect injured/inactive players to fill an impossible slate.
+    # An all-out roster has no legal minutes allocation; return zero minutes
+    # rather than assigning 240 minutes to known absences.
     if not available.any():
-        available[:] = True
+        return np.zeros((n_sims, n), dtype=float)
     means = np.array(
         [p.mean if bool(available[i]) else 0.0 for i, p in enumerate(players)],
         dtype=float,
