@@ -216,3 +216,16 @@ def test_a_thin_new_season_action_counts_a_little_more_than_last_year():
     assert found["Spotup"]["poss"] == pytest.approx(220)
     assert found["Spotup"]["ppp"] > plain
     assert found["Spotup"]["ppp"] < 1.08
+
+
+def test_synergy_cache_retains_source_frame_identity():
+    from nba_sim.features.shares import _CACHE_OWNERS, _measured_player
+
+    frame = pd.DataFrame([{
+        "season": "2026-27", "entity_type": "P", "entity_id": 987654,
+        "player_name": "Cache Identity Example", "side": "offensive",
+        "play_type": "Isolation", "poss": 90, "gp": 3, "ppp": 1.1,
+    }])
+    measured = _measured_player(frame, "Cache Identity Example", "2026-27")
+    assert measured["Isolation"]["poss"] == 90
+    assert _CACHE_OWNERS[id(frame)] is frame

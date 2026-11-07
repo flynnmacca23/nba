@@ -230,3 +230,15 @@ def test_recent_fg_multiplier_tracks_cold_scoring_per_fga():
     mult, n = _recent_fg_multiplier(pd.DataFrame(rows), 7, season_eff=1.5, season="2026-27")
     assert n == 10
     assert mult < 0.95
+
+
+def test_all_unavailable_roster_never_resurrects_injured_players():
+    players = [MinutePlayer(i, 30.0, 2.0, False) for i in range(8)]
+    minutes = allocate_minutes(players, n_sims=20, seed=3)
+    assert minutes.shape == (20, 8)
+    np.testing.assert_array_equal(minutes, np.zeros((20, 8)))
+
+
+def test_empty_roster_has_zero_minutes_without_division_by_zero():
+    minutes = allocate_minutes([], n_sims=4, seed=1)
+    assert minutes.shape == (4, 0)
