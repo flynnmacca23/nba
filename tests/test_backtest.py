@@ -556,3 +556,18 @@ def test_historical_simulation_seed_is_stable_across_order_and_processes():
     assert _game_seed(17, game) != _game_seed(17, other)
     assert _game_seed(17, game) != _game_seed(18, game)
     assert 0 <= _game_seed(17, game) < 2**32
+
+
+def test_replay_rejects_empty_windows_and_invalid_simulation_counts():
+    import pytest
+    from nba_sim.backtest.walkforward import run_backtest
+
+    # Validate before attempting to load external historical line files.
+    for kwargs in (
+        {"last_n": 0}, {"last_n": -1}, {"last_n": True},
+        {"last_n": 1.5}, {"n_sims": 0}, {"n_sims": -10},
+        {"n_sims": True}, {"n_sims": 2.5},
+        {"seed": -1}, {"seed": True}, {"seed": 1.5},
+    ):
+        with pytest.raises(ValueError):
+            run_backtest(**kwargs)
