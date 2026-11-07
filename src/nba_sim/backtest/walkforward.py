@@ -115,6 +115,14 @@ def run_backtest(
     seed: int = 1,
     lines: pd.DataFrame | None = None,
 ) -> dict:
+    # An empty replay or zero-draw Monte Carlo can produce misleadingly
+    # successful reports with no evaluated games.
+    if isinstance(last_n, bool) or not isinstance(last_n, (int, np.integer)) or last_n <= 0:
+        raise ValueError("last_n must be a positive integer")
+    if isinstance(n_sims, bool) or not isinstance(n_sims, (int, np.integer)) or n_sims <= 0:
+        raise ValueError("n_sims must be a positive integer")
+    if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or seed < 0:
+        raise ValueError("seed must be a nonnegative integer")
     if lines is None:
         csv_path = path or _default_lines_path()
         if csv_path is None or not Path(csv_path).exists():
