@@ -42,6 +42,14 @@ def max_drawdown(profits) -> float:
 def calibration_table(prob, outcome, bins: int = 8) -> list[dict]:
     p = np.asarray(prob, dtype=float)
     y = np.asarray(outcome, dtype=float)
+    if p.ndim != 1 or y.ndim != 1 or len(p) != len(y):
+        raise ValueError("Calibration requires equally sized one-dimensional arrays")
+    if not isinstance(bins, (int, np.integer)) or isinstance(bins, (bool, np.bool_)) or bins < 1:
+        raise ValueError("Calibration bins must be a positive integer")
+    if not (np.isfinite(p).all() and np.isfinite(y).all()):
+        raise ValueError("Calibration inputs must be finite")
+    if ((p < 0) | (p > 1)).any() or (~np.isin(y, [0.0, 1.0])).any():
+        raise ValueError("Calibration requires probabilities in [0, 1] and binary outcomes")
     if len(p) == 0:
         return []
     edges = np.linspace(0, 1, bins + 1)
