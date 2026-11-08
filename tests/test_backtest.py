@@ -571,3 +571,34 @@ def test_replay_rejects_empty_windows_and_invalid_simulation_counts():
     ):
         with pytest.raises(ValueError):
             run_backtest(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "prob,outcome,bins",
+    [
+        ([0.2, 0.8], [1.0], 8),
+        ([[0.2]], [1.0], 8),
+        ([float("nan")], [1.0], 8),
+        ([float("inf")], [1.0], 8),
+        ([1.1], [1.0], 8),
+        ([-0.1], [0.0], 8),
+        ([0.5], [0.5], 8),
+        ([0.5], [1.0], 0),
+        ([0.5], [1.0], 2.5),
+        ([0.5], [1.0], True),
+    ],
+)
+def test_calibration_rejects_invalid_inputs(prob, outcome, bins):
+    from nba_sim.backtest.metrics import calibration_table
+
+    with pytest.raises(ValueError):
+        calibration_table(prob, outcome, bins=bins)
+
+
+def test_calibration_accepts_empty_inputs_and_probability_one():
+    from nba_sim.backtest.metrics import calibration_table
+
+    assert calibration_table([], []) == []
+    rows = calibration_table([0.0, 1.0], [0, 1], bins=2)
+    assert [row["n"] for row in rows] == [1, 1]
+    assert rows[-1]["frequency"] == 1.0
