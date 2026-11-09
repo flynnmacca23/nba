@@ -5,17 +5,29 @@ from __future__ import annotations
 import numpy as np
 
 
-def log_loss(prob, outcome) -> float:
-    p = np.clip(np.asarray(prob, dtype=float), 1e-6, 1 - 1e-6)
+def _binary_forecasts(prob, outcome) -> tuple[np.ndarray, np.ndarray]:
+    """Validate paired forecasts before computing proper scoring rules."""
+    p = np.asarray(prob, dtype=float)
     y = np.asarray(outcome, dtype=float)
+    if p.ndim != 1 or y.ndim != 1 or len(p) != len(y):
+        raise ValueError("Scores require equally sized one-dimensional arrays")
+    if not (np.isfinite(p).all() and np.isfinite(y).all()):
+        raise ValueError("Scores require finite probabilities and outcomes")
+    if ((p < 0) | (p > 1)).any() or (~np.isin(y, [0.0, 1.0])).any():
+        raise ValueError("Scores require probabilities in [0, 1] and binary outcomes")
+    return p, y
+
+
+def log_loss(prob, outcome) -> float:
+    p, y = _binary_forecasts(prob, outcome)
     if len(y) == 0:
         return float("nan")
+    p = np.clip(p, 1e-6, 1 - 1e-6)
     return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
 
 
 def brier(prob, outcome) -> float:
-    p = np.asarray(prob, dtype=float)
-    y = np.asarray(outcome, dtype=float)
+    p, y = _binary_forecasts(prob, outcome)
     if len(y) == 0:
         return float("nan")
     return float(np.mean((p - y) ** 2))
