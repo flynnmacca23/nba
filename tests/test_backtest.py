@@ -602,3 +602,33 @@ def test_calibration_accepts_empty_inputs_and_probability_one():
     rows = calibration_table([0.0, 1.0], [0, 1], bins=2)
     assert [row["n"] for row in rows] == [1, 1]
     assert rows[-1]["frequency"] == 1.0
+
+
+def test_proper_scores_reject_invalid_binary_forecasts():
+    import pytest
+    from nba_sim.backtest.metrics import brier, log_loss
+
+    invalid = [
+        ([0.2, 0.8], [1]),
+        ([[0.2, 0.8]], [[0, 1]]),
+        ([float("nan")], [1]),
+        ([float("inf")], [1]),
+        ([-0.1], [0]),
+        ([1.1], [1]),
+        ([0.4], [0.5]),
+        ([0.4], [float("nan")]),
+    ]
+    for score in (brier, log_loss):
+        for probabilities, outcomes in invalid:
+            with pytest.raises(ValueError):
+                score(probabilities, outcomes)
+
+
+def test_proper_scores_preserve_valid_boundaries_and_empty_semantics():
+    import numpy as np
+    from nba_sim.backtest.metrics import brier, log_loss
+
+    assert brier([0, 1], [0, 1]) == 0
+    assert np.isfinite(log_loss([0, 1], [0, 1]))
+    assert np.isnan(brier([], []))
+    assert np.isnan(log_loss([], []))
