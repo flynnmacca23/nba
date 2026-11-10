@@ -83,9 +83,20 @@ def calibration_table(prob, outcome, bins: int = 8) -> list[dict]:
 
 
 def closing_line_value(bet_implied, close_implied) -> float | None:
+    """Average change in implied probability for matched, recorded prices.
+
+    Missing quotes may be represented by NaN, but malformed probabilities
+    and unpaired arrays must not silently broadcast or contaminate CLV.
+    """
     bet = np.asarray(bet_implied, dtype=float)
     close = np.asarray(close_implied, dtype=float)
+    if bet.ndim != 1 or close.ndim != 1 or bet.shape != close.shape:
+        raise ValueError("CLV requires equally sized one-dimensional price arrays")
     valid = np.isfinite(bet) & np.isfinite(close)
+    if np.isinf(bet).any() or np.isinf(close).any():
+        raise ValueError("CLV implied probabilities cannot be infinite")
+    if ((bet[valid] < 0) | (bet[valid] > 1) | (close[valid] < 0) | (close[valid] > 1)).any():
+        raise ValueError("CLV implied probabilities must be in [0, 1]")
     if not valid.any():
         return None
     return float(np.mean(close[valid] - bet[valid]))
