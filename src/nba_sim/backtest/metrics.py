@@ -34,11 +34,17 @@ def brier(prob, outcome) -> float:
 
 
 def flat_roi(wins, decimal_odds) -> float:
-    wins = np.asarray(wins, dtype=bool)
+    outcomes = np.asarray(wins, dtype=float)
     prices = np.asarray(decimal_odds, dtype=float)
-    if len(wins) == 0:
+    if outcomes.ndim != 1 or prices.ndim != 1 or outcomes.shape != prices.shape:
+        raise ValueError("ROI requires equally sized one-dimensional outcomes and prices")
+    if not np.isfinite(outcomes).all() or not np.isin(outcomes, [0.0, 1.0]).all():
+        raise ValueError("ROI requires settled binary outcomes")
+    if not np.isfinite(prices).all() or (prices <= 1).any():
+        raise ValueError("ROI requires finite decimal odds greater than 1")
+    if len(outcomes) == 0:
         return float("nan")
-    profit = np.where(wins, prices - 1.0, -1.0)
+    profit = np.where(outcomes == 1, prices - 1.0, -1.0)
     return float(profit.mean())
 
 
