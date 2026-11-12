@@ -50,9 +50,12 @@ def flat_roi(wins, decimal_odds) -> float:
 
 def max_drawdown(profits) -> float:
     series = np.asarray(profits, dtype=float)
+    if series.ndim != 1 or not np.isfinite(series).all():
+        raise ValueError("Drawdown requires a one-dimensional array of finite profits")
     if len(series) == 0:
         return 0.0
-    equity = np.cumsum(series)
+    # Include the initial bankroll: losing from the first bet is a drawdown.
+    equity = np.concatenate(([0.0], np.cumsum(series)))
     peak = np.maximum.accumulate(equity)
     return float(np.max(peak - equity))
 
