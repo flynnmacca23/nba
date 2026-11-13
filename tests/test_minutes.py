@@ -242,3 +242,21 @@ def test_all_unavailable_roster_never_resurrects_injured_players():
 def test_empty_roster_has_zero_minutes_without_division_by_zero():
     minutes = allocate_minutes([], n_sims=4, seed=1)
     assert minutes.shape == (4, 0)
+
+
+@pytest.mark.parametrize("n_sims", [0, -1, 1.5, True])
+def test_allocate_minutes_rejects_invalid_simulation_counts(n_sims):
+    with pytest.raises(ValueError, match="n_sims"):
+        allocate_minutes([MinutePlayer(1, 30.0, 2.0, True)], n_sims=n_sims)
+
+
+@pytest.mark.parametrize("target", [0, -240, float("nan"), float("inf")])
+def test_allocate_minutes_rejects_invalid_target(target):
+    with pytest.raises(ValueError, match="target"):
+        allocate_minutes([MinutePlayer(1, 30.0, 2.0, True)], n_sims=2, target=target)
+
+
+@pytest.mark.parametrize("mean,std", [(float("nan"), 1), (30, float("inf")), (-1, 1), (30, -1)])
+def test_allocate_minutes_rejects_invalid_priors(mean, std):
+    with pytest.raises(ValueError, match="priors"):
+        allocate_minutes([MinutePlayer(1, mean, std, True)], n_sims=2)
