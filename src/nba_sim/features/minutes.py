@@ -100,6 +100,12 @@ def allocate_minutes(
 
     An unavailable player stays at zero. Everyone else absorbs that playing time.
     """
+    if isinstance(n_sims, (bool, np.bool_)) or not isinstance(n_sims, (int, np.integer)) or n_sims < 1:
+        raise ValueError("n_sims must be a positive integer")
+    if not np.isfinite(target) or target <= 0:
+        raise ValueError("target must be finite and positive")
+    if any(not np.isfinite(p.mean) or not np.isfinite(p.std) or p.mean < 0 or p.std < 0 for p in players):
+        raise ValueError("minute priors must be finite and nonnegative")
     if rng is None:
         rng = np.random.default_rng(seed)
     n = len(players)
