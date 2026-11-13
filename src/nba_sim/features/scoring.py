@@ -19,7 +19,7 @@ from nba_sim.warehouse import Warehouse
 
 _SEASONS = ("2023-24", "2024-25", "2025-26", "2026-27")
 # Five games ties last season. Forty games is this season's line.
-_BLEND_GAMES = 5.0
+_BLEND_GAMES = 8.0
 _FULL_SEASON_GAMES = 40.0
 _BLEND_KEYS = (
     "usg",

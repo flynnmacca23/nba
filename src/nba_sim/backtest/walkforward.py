@@ -7,6 +7,7 @@ empty result until a settled prop file is stored.
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -45,15 +46,65 @@ def empty_player_props(lines: pd.DataFrame | None = None) -> dict:
 
 
 def _score_ready_props(props: pd.DataFrame) -> dict:
-    prob = props["model_prob"].to_numpy(dtype=float)
-    outcome = props["outcome"].to_numpy(dtype=float)
+    """Score only settled props with auditable pregame source timestamps."""
+    required = (
+        "game_id", "source", "snapshot_id", "model_version",
+        "available_at", "prediction_at", "game_start_at",
+    )
+    missing = [column for column in required if column not in props.columns]
+    reason = None
+    if missing:
+        reason = f"Missing prop provenance columns: {', '.join(missing)}"
+    else:
+        for column in ("game_id", "source", "snapshot_id", "model_version"):
+            if props[column].isna().any() or props[column].astype(str).str.strip().eq("").any():
+                reason = f"Missing prop identity: {column}"
+                break
+    if reason is None:
+        times = {}
+        for column in ("available_at", "prediction_at", "game_start_at"):
+            values = []
+            for value in props[column]:
+                try:
+                    stamp = pd.Timestamp(value)
+                except (TypeError, ValueError, OverflowError):
+                    reason = f"Invalid prop timestamp: {column}"
+                    break
+                if pd.isna(stamp) or stamp.tzinfo is None:
+                    reason = f"Prop timestamp must be timezone-aware: {column}"
+                    break
+                values.append(stamp.tz_convert("UTC"))
+            if reason is not None:
+                break
+            times[column] = pd.DatetimeIndex(values)
+        if reason is None and (
+            (times["available_at"] > times["prediction_at"]).any()
+            or (times["prediction_at"] >= times["game_start_at"]).any()
+        ):
+            reason = "Prop prices or predictions were not available before tipoff"
+    prob = pd.to_numeric(props["model_prob"], errors="coerce").to_numpy(dtype=float)
+    outcome = pd.to_numeric(props["outcome"], errors="coerce").to_numpy(dtype=float)
+    if reason is None and (
+        not np.isfinite(prob).all() or not np.isfinite(outcome).all()
+        or ((prob < 0) | (prob > 1)).any()
+        or (~np.isin(outcome, [0.0, 1.0])).any()
+    ):
+        reason = "Prop probabilities must be in [0,1] and settled outcomes must be binary"
+    if reason is not None:
+        return {
+            "status": "unevaluable",
+            "market": "player_props",
+            "n_bets": 0,
+            "n_rows": int(len(props)),
+            "message": reason,
+        }
     return {
         "status": "ok",
         "market": "player_props",
         "n_bets": int(len(props)),
         "log_loss": log_loss(prob, outcome),
         "brier": brier(prob, outcome),
-        "message": "Scored from stored model probabilities and settled outcomes.",
+        "message": "Scored from timestamped pregame probabilities and settled outcomes.",
     }
 
 
@@ -64,6 +115,14 @@ def run_backtest(
     seed: int = 1,
     lines: pd.DataFrame | None = None,
 ) -> dict:
+    # An empty replay or zero-draw Monte Carlo can produce misleadingly
+    # successful reports with no evaluated games.
+    if isinstance(last_n, bool) or not isinstance(last_n, (int, np.integer)) or last_n <= 0:
+        raise ValueError("last_n must be a positive integer")
+    if isinstance(n_sims, bool) or not isinstance(n_sims, (int, np.integer)) or n_sims <= 0:
+        raise ValueError("n_sims must be a positive integer")
+    if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or seed < 0:
+        raise ValueError("seed must be a nonnegative integer")
     if lines is None:
         csv_path = path or _default_lines_path()
         if csv_path is None or not Path(csv_path).exists():
@@ -89,28 +148,43 @@ def run_backtest(
     rated = _pregame_ratings(lines)
     window = rated.tail(last_n)
     bets = []
-    for index, game in enumerate(window.itertuples(index=False)):
+    for game in window.itertuples(index=False):
         spec = _composite_spec(game)
-        result = simulate_game(spec, n_sims=n_sims, seed=seed + index)
+        result = simulate_game(spec, n_sims=n_sims, seed=_game_seed(seed, game))
         bets.extend(_grade(game, result))
     frame = pd.DataFrame(bets)
     n_games = 0
     if not frame.empty and {"date", "home", "away"}.issubset(frame.columns):
         n_games = int(frame.groupby(["date", "home", "away"]).ngroups)
+    settled_ml = frame.loc[frame["bet_market"].eq("moneyline") & frame["won"].notna()] if not frame.empty else frame
     return {
         "status": "ok",
         "message": f"Walk-forward on the last {n_games} games with ratings fit only on earlier games.",
         "n_games": n_games,
+        "validation": {
+            "replay": "synthetic_team_only",
+            "input_provenance": "unverified_historical_lines",
+            "claim": "Diagnostic backtest only; not a point-in-time full-player replay.",
+        },
         "metrics": _metrics(frame),
         "calibration": calibration_table(
-            frame.loc[frame["bet_market"].eq("moneyline"), "model_prob"]
-            if "bet_market" in frame
-            else [],
-            frame.loc[frame["bet_market"].eq("moneyline"), "won"] if "bet_market" in frame else [],
+            settled_ml["model_prob"] if "model_prob" in settled_ml else [],
+            settled_ml["won"] if "won" in settled_ml else [],
         ),
         "player_props": empty_player_props(lines if "market" in lines.columns else None),
         "bets": frame.to_dict("records"),
     }
+
+
+def _game_seed(seed: int, game) -> int:
+    """Stable per-game simulation seed, independent of CSV ordering.
+
+    Python's built-in hash is randomized between processes, so use a stable
+    digest of the game identity instead.
+    """
+    identity = f"{str(game.date)[:10]}|{game.home}|{game.away}".encode("utf-8")
+    digest = hashlib.sha256(identity).digest()
+    return (int(seed) + int.from_bytes(digest[:8], "big")) % (2**32)
 
 
 def _default_lines_path() -> Path | None:
@@ -123,41 +197,67 @@ def _default_lines_path() -> Path | None:
 
 
 def _pregame_ratings(lines: pd.DataFrame) -> pd.DataFrame:
+    """Predict an entire day's slate before learning any result from that day.
+
+    Same-day outcomes are pooled into commutative updates. This prevents CSV
+    ordering from changing either the current slate or the following day.
+    """
     strength: dict[str, float] = {}
     scoring: dict[str, float] = {}
     hca = 2.2
     rows = []
-    ordered = lines.sort_values("date")
-    for game in ordered.itertuples(index=False):
-        home, away = game.home, game.away
-        hs = strength.get(home, 0.0)
-        aws = strength.get(away, 0.0)
-        ht = scoring.get(home, 112.0)
-        at = scoring.get(away, 112.0)
-        pred_margin = hs - aws + hca
-        pred_total = ht + at
-        rows.append(
-            {
-                "date": game.date,
-                "home": home,
-                "away": away,
-                "home_score": game.home_score,
-                "away_score": game.away_score,
-                "home_spread": game.home_spread,
-                "total": game.total,
-                "moneyline_home": game.moneyline_home,
-                "moneyline_away": game.moneyline_away,
-                "pred_margin": pred_margin,
-                "pred_total": pred_total,
-            }
-        )
-        margin = float(game.home_score) - float(game.away_score)
-        err = margin - pred_margin
-        strength[home] = hs + 0.12 * err
-        strength[away] = aws - 0.12 * err
-        scoring[home] = 0.9 * ht + 0.1 * float(game.home_score)
-        scoring[away] = 0.9 * at + 0.1 * float(game.away_score)
-        hca = 0.98 * hca + 0.02 * (margin - (hs - aws))
+    ordered = lines.copy()
+    ordered["_rating_date"] = pd.to_datetime(ordered["date"]).dt.normalize()
+    if ordered["_rating_date"].isna().any():
+        raise ValueError("Backtest contains an invalid game date")
+    ordered = ordered.sort_values("_rating_date", kind="stable")
+    for _, day in ordered.groupby("_rating_date", sort=True):
+        strength_delta: dict[str, float] = {}
+        score_observations: dict[str, list[float]] = {}
+        hca_residuals = []
+        for game in day.drop(columns=["_rating_date"]).itertuples(index=False):
+            home, away = game.home, game.away
+            hs = strength.get(home, 0.0)
+            aws = strength.get(away, 0.0)
+            ht = scoring.get(home, 112.0)
+            at = scoring.get(away, 112.0)
+            pred_margin = hs - aws + hca
+            rows.append(
+                {
+                    "date": game.date,
+                    "home": home,
+                    "away": away,
+                    "home_score": game.home_score,
+                    "away_score": game.away_score,
+                    "home_spread": game.home_spread,
+                    "total": game.total,
+                    "moneyline_home": game.moneyline_home,
+                    "moneyline_away": game.moneyline_away,
+                    "pred_margin": pred_margin,
+                    "pred_total": ht + at,
+                    **{
+                        name: getattr(game, name, None)
+                        for name in (
+                            "spread_home_american", "spread_away_american",
+                            "total_over_american", "total_under_american",
+                        )
+                    },
+                }
+            )
+            home_score = float(game.home_score)
+            away_score = float(game.away_score)
+            margin = home_score - away_score
+            err = margin - pred_margin
+            strength_delta[home] = strength_delta.get(home, 0.0) + 0.12 * err
+            strength_delta[away] = strength_delta.get(away, 0.0) - 0.12 * err
+            score_observations.setdefault(home, []).append(home_score)
+            score_observations.setdefault(away, []).append(away_score)
+            hca_residuals.append(margin - (hs - aws))
+        for team, delta in strength_delta.items():
+            strength[team] = strength.get(team, 0.0) + delta
+        for team, scores in score_observations.items():
+            scoring[team] = 0.9 * scoring.get(team, 112.0) + 0.1 * float(np.mean(scores))
+        hca = 0.98 * hca + 0.02 * float(np.mean(hca_residuals))
     return pd.DataFrame(rows)
 
 
@@ -232,40 +332,78 @@ def _grade(game, result) -> list[dict]:
         "away_score": game.away_score,
     }
     rows = []
-    ml_home = _num(game.moneyline_home)
-    ml_away = _num(game.moneyline_away)
+    ml_home = _recorded_price(game.moneyline_home)
+    ml_away = _recorded_price(game.moneyline_away)
     if ml_home is not None and ml_away is not None:
         fair_home, fair_away = devig_american([ml_home, ml_away])
         home_won = float(game.home_score) > float(game.away_score)
         if home_win - fair_home >= (1 - home_win) - fair_away and home_win - fair_home > 0.02:
-            rows.append({**base, **_bet("moneyline", home_win, home_won, ml_home)})
+            rows.append({**base, **_bet("moneyline", home_win, home_won, ml_home), "market_prob": fair_home})
         elif (1 - home_win) - fair_away > 0.02:
-            rows.append({**base, **_bet("moneyline", 1 - home_win, not home_won, ml_away)})
+            rows.append({**base, **_bet("moneyline", 1 - home_win, not home_won, ml_away), "market_prob": fair_away})
         else:
-            rows.append({**base, **_watch("moneyline", home_win, home_won)})
+            rows.append({**base, **_watch("moneyline", home_win, home_won), "market_prob": fair_home})
     spread = _num(game.home_spread)
     if spread is not None:
         cover = float(np.mean((home - away + spread) > 0) + 0.5 * np.mean((home - away + spread) == 0))
         margin = float(game.home_score) - float(game.away_score) + spread
         if margin == 0:
-            rows.append({**base, **_watch("spread", cover, False)})
+            rows.append({**base, **_push("spread", cover)})
         elif cover - 0.5 > 0.03:
-            rows.append({**base, **_bet("spread", cover, margin > 0, -110)})
+            price = _recorded_price(getattr(game, "spread_home_american", None))
+            selection = _bet("spread", cover, margin > 0, price) if price is not None else _unpriced("spread", cover, margin > 0)
+            rows.append({**base, **selection})
         elif 0.5 - cover > 0.03:
-            rows.append({**base, **_bet("spread", 1 - cover, margin < 0, -110)})
+            price = _recorded_price(getattr(game, "spread_away_american", None))
+            selection = _bet("spread", 1 - cover, margin < 0, price) if price is not None else _unpriced("spread", 1 - cover, margin < 0)
+            rows.append({**base, **selection})
         else:
             rows.append({**base, **_watch("spread", cover, margin > 0)})
     total_line = _num(game.total)
     if total_line is not None:
         over = float(np.mean(total > total_line) + 0.5 * np.mean(total == total_line))
-        actual_over = float(game.home_score) + float(game.away_score) > total_line
+        actual_points = float(game.home_score) + float(game.away_score)
+        if actual_points == total_line:
+            rows.append({**base, **_push("total", over)})
+            return rows
+        actual_over = actual_points > total_line
         if over - 0.5 > 0.03:
-            rows.append({**base, **_bet("total", over, actual_over, -110)})
+            price = _recorded_price(getattr(game, "total_over_american", None))
+            selection = _bet("total", over, actual_over, price) if price is not None else _unpriced("total", over, actual_over)
+            rows.append({**base, **selection})
         elif 0.5 - over > 0.03:
-            rows.append({**base, **_bet("total", 1 - over, not actual_over, -110)})
+            price = _recorded_price(getattr(game, "total_under_american", None))
+            selection = _bet("total", 1 - over, not actual_over, price) if price is not None else _unpriced("total", 1 - over, not actual_over)
+            rows.append({**base, **selection})
         else:
             rows.append({**base, **_watch("total", over, actual_over)})
     return rows
+
+
+def _recorded_price(value) -> float | None:
+    """Require a plausible, explicitly recorded American price."""
+    price = _num(value)
+    return price if price is not None and (price <= -100 or price >= 100) else None
+
+
+def _unpriced(market: str, prob: float, won: bool) -> dict:
+    """Keep the forecast for calibration, but never fabricate betting returns."""
+    return {**_watch(market, prob, won), "price_status": "missing"}
+
+
+def _push(market: str, prob: float) -> dict:
+    """A settled push returns the stake and is excluded from binary calibration."""
+    return {
+        "bet_market": market,
+        "model_prob": prob,
+        "won": np.nan,
+        "decimal_odds": np.nan,
+        "profit": 0.0,
+        "american": np.nan,
+        "implied": np.nan,
+        "bet": False,
+        "settlement": "push",
+    }
 
 
 def _watch(market: str, prob: float, won: bool) -> dict:
@@ -293,6 +431,7 @@ def _bet(market: str, prob: float, won: bool, american: float) -> dict:
         "american": american,
         "implied": american_to_implied(american),
         "bet": True,
+        "price_status": "recorded",
     }
 
 
@@ -312,11 +451,21 @@ def _metrics(frame: pd.DataFrame) -> dict:
         return output
     for market in ("moneyline", "spread", "total"):
         rows = frame[frame["bet_market"] == market]
-        bets = rows[rows["bet"] == True] if "bet" in rows.columns else rows.iloc[0:0]  # noqa: E712
+        settled = rows.loc[rows["won"].notna()]
+        bets = settled[settled["bet"] == True] if "bet" in settled.columns else settled.iloc[0:0]  # noqa: E712
+        baseline = settled.loc[settled["market_prob"].notna()] if "market_prob" in settled else settled.iloc[0:0]
         output[market] = {
             "n": int(len(bets)),
-            "log_loss": None if rows.empty else log_loss(rows["model_prob"], rows["won"]),
-            "brier": None if rows.empty else brier(rows["model_prob"], rows["won"]),
+            "market_log_loss": None if baseline.empty else log_loss(baseline["market_prob"], baseline["won"]),
+            "market_brier": None if baseline.empty else brier(baseline["market_prob"], baseline["won"]),
+            "brier_improvement_vs_market": None if baseline.empty else (
+                brier(baseline["market_prob"], baseline["won"])
+                - brier(baseline["model_prob"], baseline["won"])
+            ),
+            "n_unpriced": int(rows["price_status"].eq("missing").sum()) if "price_status" in rows else 0,
+            "n_pushes": int(rows["settlement"].eq("push").sum()) if "settlement" in rows else 0,
+            "log_loss": None if settled.empty else log_loss(settled["model_prob"], settled["won"]),
+            "brier": None if settled.empty else brier(settled["model_prob"], settled["won"]),
             "roi": None if bets.empty else flat_roi(bets["won"].astype(bool), bets["decimal_odds"]),
             "drawdown": None if bets.empty else max_drawdown(bets["profit"]),
             "clv": closing_line_value([], []),

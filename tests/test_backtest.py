@@ -251,6 +251,8 @@ def test_walk_forward_scores_team_markets_and_leaves_props_empty():
     assert set(result["metrics"]) >= {"moneyline", "spread", "total", "note"}
     assert result["player_props"]["status"] == "empty"
     assert result["metrics"]["moneyline"]["log_loss"] is not None
+    assert result["validation"]["replay"] == "synthetic_team_only"
+    assert result["validation"]["input_provenance"] == "unverified_historical_lines"
 
 
 def test_a_players_own_pick_and_roll_sample_survives_shrinkage():
@@ -466,3 +468,167 @@ def test_this_season_lineups_count_more_and_a_short_group_stays_behind():
     trust = 40.0 / 76.0
     assert pace[last] == pytest.approx((1.0 - trust) * 100 + trust * 112)
     assert pace[last] > 106
+
+
+def test_same_day_results_never_affect_other_pregame_ratings():
+    from nba_sim.backtest.walkforward import _pregame_ratings
+
+    base = {
+        "date": "2026-01-02", "home_spread": -2.5, "total": 220,
+        "moneyline_home": -130, "moneyline_away": 110,
+    }
+    first = {**base, "home": "den", "away": "mia", "home_score": 180, "away_score": 90}
+    second = {**base, "home": "den", "away": "bos", "home_score": 100, "away_score": 101}
+    games = pd.DataFrame([first, second])
+    rated = _pregame_ratings(games)
+    assert rated["pred_margin"].tolist() == pytest.approx([2.2, 2.2])
+    assert rated["pred_total"].tolist() == pytest.approx([224.0, 224.0])
+    reversed_rated = _pregame_ratings(games.iloc[::-1])
+    assert reversed_rated["pred_margin"].tolist() == pytest.approx([2.2, 2.2])
+    assert reversed_rated["pred_total"].tolist() == pytest.approx([224.0, 224.0])
+
+
+def test_next_day_ratings_are_independent_of_same_day_row_order():
+    from nba_sim.backtest.walkforward import _pregame_ratings
+
+    base = {
+        "home_spread": -2.5, "total": 220,
+        "moneyline_home": -130, "moneyline_away": 110,
+    }
+    first = {**base, "date": "2026-01-02", "home": "den", "away": "mia",
+             "home_score": 180, "away_score": 90}
+    second = {**base, "date": "2026-01-02", "home": "den", "away": "bos",
+              "home_score": 100, "away_score": 101}
+    tomorrow = {**base, "date": "2026-01-03", "home": "den", "away": "bos",
+                "home_score": 99, "away_score": 98}
+    forward = _pregame_ratings(pd.DataFrame([first, second, tomorrow]))
+    reversed_day = _pregame_ratings(pd.DataFrame([second, first, tomorrow]))
+    assert forward.iloc[-1]["pred_margin"] == pytest.approx(reversed_day.iloc[-1]["pred_margin"])
+    assert forward.iloc[-1]["pred_total"] == pytest.approx(reversed_day.iloc[-1]["pred_total"])
+    assert forward.iloc[-1]["pred_margin"] != pytest.approx(2.2)
+
+
+def test_invalid_game_dates_fail_instead_of_disappearing_from_backtest():
+    from nba_sim.backtest.walkforward import _pregame_ratings
+
+    with pytest.raises(ValueError, match="invalid game date"):
+        _pregame_ratings(pd.DataFrame([{
+            "date": None, "home": "den", "away": "mia", "home_score": 110,
+            "away_score": 100, "home_spread": -3, "total": 220,
+            "moneyline_home": -140, "moneyline_away": 120,
+        }]))
+
+
+def test_player_prop_scoring_requires_pregame_provenance():
+    props = pd.DataFrame([{"market": "player_points", "model_prob": 0.7, "outcome": 1}])
+    result = empty_player_props(props)
+    assert result["status"] == "unevaluable"
+    assert result["n_bets"] == 0
+    assert "provenance" in result["message"]
+
+
+def test_player_prop_scoring_accepts_verified_timing_and_rejects_late_prices():
+    props = pd.DataFrame([{
+        "market": "player_points", "game_id": "g1", "source": "archived_book",
+        "snapshot_id": "s1", "model_version": "v1",
+        "available_at": "2026-01-02T17:00:00Z",
+        "prediction_at": "2026-01-02T17:10:00Z",
+        "game_start_at": "2026-01-02T18:00:00Z",
+        "model_prob": 0.7, "outcome": 1,
+    }])
+    scored = empty_player_props(props)
+    assert scored["status"] == "ok"
+    assert scored["n_bets"] == 1
+    assert scored["brier"] == pytest.approx(0.09)
+    props.loc[0, "available_at"] = "2026-01-02T17:30:00Z"
+    assert empty_player_props(props)["status"] == "unevaluable"
+    props.loc[0, "available_at"] = "2026-01-02T17:00:00"
+    assert empty_player_props(props)["status"] == "unevaluable"
+
+
+def test_historical_simulation_seed_is_stable_across_order_and_processes():
+    from types import SimpleNamespace
+    from nba_sim.backtest.walkforward import _game_seed
+
+    game = SimpleNamespace(date="2026-01-02", home="den", away="mia")
+    other = SimpleNamespace(date="2026-01-02", home="bos", away="mia")
+    assert _game_seed(17, game) == _game_seed(17, game)
+    assert _game_seed(17, game) != _game_seed(17, other)
+    assert _game_seed(17, game) != _game_seed(18, game)
+    assert 0 <= _game_seed(17, game) < 2**32
+
+
+def test_replay_rejects_empty_windows_and_invalid_simulation_counts():
+    import pytest
+    from nba_sim.backtest.walkforward import run_backtest
+
+    # Validate before attempting to load external historical line files.
+    for kwargs in (
+        {"last_n": 0}, {"last_n": -1}, {"last_n": True},
+        {"last_n": 1.5}, {"n_sims": 0}, {"n_sims": -10},
+        {"n_sims": True}, {"n_sims": 2.5},
+        {"seed": -1}, {"seed": True}, {"seed": 1.5},
+    ):
+        with pytest.raises(ValueError):
+            run_backtest(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "prob,outcome,bins",
+    [
+        ([0.2, 0.8], [1.0], 8),
+        ([[0.2]], [1.0], 8),
+        ([float("nan")], [1.0], 8),
+        ([float("inf")], [1.0], 8),
+        ([1.1], [1.0], 8),
+        ([-0.1], [0.0], 8),
+        ([0.5], [0.5], 8),
+        ([0.5], [1.0], 0),
+        ([0.5], [1.0], 2.5),
+        ([0.5], [1.0], True),
+    ],
+)
+def test_calibration_rejects_invalid_inputs(prob, outcome, bins):
+    from nba_sim.backtest.metrics import calibration_table
+
+    with pytest.raises(ValueError):
+        calibration_table(prob, outcome, bins=bins)
+
+
+def test_calibration_accepts_empty_inputs_and_probability_one():
+    from nba_sim.backtest.metrics import calibration_table
+
+    assert calibration_table([], []) == []
+    rows = calibration_table([0.0, 1.0], [0, 1], bins=2)
+    assert [row["n"] for row in rows] == [1, 1]
+    assert rows[-1]["frequency"] == 1.0
+
+
+def test_proper_scores_reject_invalid_binary_forecasts():
+    import pytest
+    from nba_sim.backtest.metrics import brier, log_loss
+
+    invalid = [
+        ([0.2, 0.8], [1]),
+        ([[0.2, 0.8]], [[0, 1]]),
+        ([float("nan")], [1]),
+        ([float("inf")], [1]),
+        ([-0.1], [0]),
+        ([1.1], [1]),
+        ([0.4], [0.5]),
+        ([0.4], [float("nan")]),
+    ]
+    for score in (brier, log_loss):
+        for probabilities, outcomes in invalid:
+            with pytest.raises(ValueError):
+                score(probabilities, outcomes)
+
+
+def test_proper_scores_preserve_valid_boundaries_and_empty_semantics():
+    import numpy as np
+    from nba_sim.backtest.metrics import brier, log_loss
+
+    assert brier([0, 1], [0, 1]) == 0
+    assert np.isfinite(log_loss([0, 1], [0, 1]))
+    assert np.isnan(brier([], []))
+    assert np.isnan(log_loss([], []))
