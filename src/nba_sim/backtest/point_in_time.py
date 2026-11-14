@@ -19,13 +19,18 @@ def available_as_of(
 
     Reject missing provenance instead of silently using future or unknown data.
     """
+    # Validate the replay cutoff even for empty or provenance-free inputs.
+    # A non-strict source filter must not hide an invalid prediction clock.
+    try:
+        cutoff = pd.Timestamp(prediction_time)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("prediction_time must be a valid timezone-aware timestamp") from exc
+    if pd.isna(cutoff) or cutoff.tzinfo is None:
+        raise ValueError("prediction_time must include a valid timezone")
     if available_column not in frame.columns:
         if strict:
             raise ValueError(f"Missing point-in-time provenance column: {available_column}")
         return frame.iloc[0:0].copy()
-    cutoff = pd.Timestamp(prediction_time)
-    if cutoff.tzinfo is None:
-        raise ValueError("prediction_time must include a timezone")
     # utc=True would silently interpret naive timestamps as UTC. That is not
     # valid source provenance, so validate each value before UTC conversion.
     def parse_stamp(value):
