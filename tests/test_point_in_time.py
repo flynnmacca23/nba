@@ -137,3 +137,16 @@ def test_snapshot_manifest_rejects_unverifiable_tipoff(bad_start):
     rows["game_start_at"] = bad_start
     with pytest.raises(ValueError, match="game_start_at"):
         validate_snapshot_manifest(rows)
+
+
+@pytest.mark.parametrize("bad_cutoff", [None, "", "not-a-time", "2026-10-22", pd.NaT])
+@pytest.mark.parametrize("with_provenance", [True, False])
+def test_non_strict_filter_never_accepts_invalid_replay_cutoff(bad_cutoff, with_provenance):
+    rows = pd.DataFrame({"available_at": ["2026-10-22T10:00:00Z"]}) if with_provenance else pd.DataFrame({"value": [1]})
+    with pytest.raises(ValueError, match="prediction_time"):
+        available_as_of(rows, bad_cutoff, strict=False)
+
+
+def test_non_strict_filter_without_provenance_still_returns_empty_for_valid_cutoff():
+    rows = pd.DataFrame({"value": [1]})
+    assert available_as_of(rows, "2026-10-22T11:00:00Z", strict=False).empty
