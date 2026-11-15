@@ -86,10 +86,16 @@ def validate_snapshot_manifest(manifest: pd.DataFrame) -> None:
         # Pandas' utc=True accepts naive values by assuming UTC. That would
         # silently fabricate provenance, so reject them explicitly.
         for value in raw:
-            stamp = pd.Timestamp(value)
+            try:
+                stamp = pd.Timestamp(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(f"Invalid snapshot timestamp: {column}") from exc
             if pd.isna(stamp) or stamp.tzinfo is None:
                 raise ValueError(f"Snapshot timestamp must be timezone-aware: {column}")
-        timestamps[column] = pd.to_datetime(raw, utc=True, errors="raise")
+        try:
+            timestamps[column] = pd.to_datetime(raw, utc=True, errors="raise")
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Invalid snapshot timestamp: {column}") from exc
     if (timestamps["observed_at"] > timestamps["available_at"]).any():
         raise ValueError("Snapshot cannot be available before observation")
     if (timestamps["available_at"] > timestamps["prediction_at"]).any():
