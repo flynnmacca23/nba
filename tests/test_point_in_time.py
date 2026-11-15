@@ -150,3 +150,14 @@ def test_non_strict_filter_never_accepts_invalid_replay_cutoff(bad_cutoff, with_
 def test_non_strict_filter_without_provenance_still_returns_empty_for_valid_cutoff():
     rows = pd.DataFrame({"value": [1]})
     assert available_as_of(rows, "2026-10-22T11:00:00Z", strict=False).empty
+
+
+@pytest.mark.parametrize("column", ["observed_at", "available_at", "prediction_at"])
+@pytest.mark.parametrize("invalid", ["not-a-time", "2026-13-99T10:00:00Z", object()])
+def test_snapshot_manifest_reports_invalid_source_timestamp(column, invalid):
+    from nba_sim.backtest.point_in_time import validate_snapshot_manifest
+
+    rows = _manifest()
+    rows.at[0, column] = invalid
+    with pytest.raises(ValueError, match=f"Invalid snapshot timestamp: {column}"):
+        validate_snapshot_manifest(rows)
