@@ -158,6 +158,9 @@ def test_snapshot_manifest_reports_invalid_source_timestamp(column, invalid):
     from nba_sim.backtest.point_in_time import validate_snapshot_manifest
 
     rows = _manifest()
+    # Pandas 3 infers a string extension dtype, which rejects arbitrary objects
+    # before the manifest validator can inspect them.
+    rows[column] = rows[column].astype(object)
     rows.at[0, column] = invalid
     with pytest.raises(ValueError, match=f"Invalid snapshot timestamp: {column}"):
         validate_snapshot_manifest(rows)
