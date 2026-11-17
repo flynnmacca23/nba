@@ -531,6 +531,7 @@ def test_player_prop_scoring_accepts_verified_timing_and_rejects_late_prices():
     props = pd.DataFrame([{
         "market": "player_points", "game_id": "g1", "source": "archived_book",
         "snapshot_id": "s1", "model_version": "v1",
+        "observed_at": "2026-01-02T16:55:00Z",
         "available_at": "2026-01-02T17:00:00Z",
         "prediction_at": "2026-01-02T17:10:00Z",
         "game_start_at": "2026-01-02T18:00:00Z",
@@ -632,3 +633,32 @@ def test_proper_scores_preserve_valid_boundaries_and_empty_semantics():
     assert np.isfinite(log_loss([0, 1], [0, 1]))
     assert np.isnan(brier([], []))
     assert np.isnan(log_loss([], []))
+
+
+@pytest.mark.parametrize("observed", [None, "2026-01-02T17:05:00Z", "2026-01-02T16:55:00"])
+def test_player_prop_scoring_rejects_missing_late_or_naive_observation(observed):
+    props = pd.DataFrame([{
+        "market": "player_points", "game_id": "g1", "source": "archived_book",
+        "snapshot_id": "s1", "model_version": "v1",
+        "observed_at": observed, "available_at": "2026-01-02T17:00:00Z",
+        "prediction_at": "2026-01-02T17:10:00Z",
+        "game_start_at": "2026-01-02T18:00:00Z",
+        "model_prob": 0.7, "outcome": 1,
+    }])
+    result = empty_player_props(props)
+    assert result["status"] == "unevaluable"
+    assert result["n_bets"] == 0
+
+
+def test_player_prop_scoring_rejects_absent_observation_column():
+    props = pd.DataFrame([{
+        "market": "player_points", "game_id": "g1", "source": "archived_book",
+        "snapshot_id": "s1", "model_version": "v1",
+        "available_at": "2026-01-02T17:00:00Z",
+        "prediction_at": "2026-01-02T17:10:00Z",
+        "game_start_at": "2026-01-02T18:00:00Z",
+        "model_prob": 0.7, "outcome": 1,
+    }])
+    result = empty_player_props(props)
+    assert result["status"] == "unevaluable"
+    assert "observed_at" in result["message"]
