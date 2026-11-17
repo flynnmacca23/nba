@@ -49,7 +49,7 @@ def _score_ready_props(props: pd.DataFrame) -> dict:
     """Score only settled props with auditable pregame source timestamps."""
     required = (
         "game_id", "source", "snapshot_id", "model_version",
-        "available_at", "prediction_at", "game_start_at",
+        "observed_at", "available_at", "prediction_at", "game_start_at",
     )
     missing = [column for column in required if column not in props.columns]
     reason = None
@@ -62,7 +62,7 @@ def _score_ready_props(props: pd.DataFrame) -> dict:
                 break
     if reason is None:
         times = {}
-        for column in ("available_at", "prediction_at", "game_start_at"):
+        for column in ("observed_at", "available_at", "prediction_at", "game_start_at"):
             values = []
             for value in props[column]:
                 try:
@@ -78,7 +78,8 @@ def _score_ready_props(props: pd.DataFrame) -> dict:
                 break
             times[column] = pd.DatetimeIndex(values)
         if reason is None and (
-            (times["available_at"] > times["prediction_at"]).any()
+            (times["observed_at"] > times["available_at"]).any()
+            or (times["available_at"] > times["prediction_at"]).any()
             or (times["prediction_at"] >= times["game_start_at"]).any()
         ):
             reason = "Prop prices or predictions were not available before tipoff"
