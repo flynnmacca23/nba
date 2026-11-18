@@ -541,6 +541,8 @@ def test_player_prop_scoring_accepts_verified_timing_and_rejects_late_prices():
     assert scored["status"] == "ok"
     assert scored["n_bets"] == 1
     assert scored["brier"] == pytest.approx(0.09)
+    assert sum(bucket["n"] for bucket in scored["calibration"]) == 1
+    assert sum(bucket["n"] * bucket["frequency"] for bucket in scored["calibration"]) == pytest.approx(1)
     props.loc[0, "available_at"] = "2026-01-02T17:30:00Z"
     assert empty_player_props(props)["status"] == "unevaluable"
     props.loc[0, "available_at"] = "2026-01-02T17:00:00"
