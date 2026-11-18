@@ -105,6 +105,7 @@ def _score_ready_props(props: pd.DataFrame) -> dict:
         "n_bets": int(len(props)),
         "log_loss": log_loss(prob, outcome),
         "brier": brier(prob, outcome),
+        "calibration": calibration_table(prob, outcome),
         "message": "Scored from timestamped pregame probabilities and settled outcomes.",
     }
 
