@@ -61,34 +61,29 @@ def max_drawdown(profits) -> float:
 
 
 def calibration_table(prob, outcome, bins: int = 8) -> list[dict]:
-    p = np.asarray(prob, dtype=float)
-    y = np.asarray(outcome, dtype=float)
-    if p.ndim != 1 or y.ndim != 1 or len(p) != len(y):
-        raise ValueError("Calibration requires equally sized one-dimensional arrays")
     if not isinstance(bins, (int, np.integer)) or isinstance(bins, (bool, np.bool_)) or bins < 1:
         raise ValueError("Calibration bins must be a positive integer")
-    if not (np.isfinite(p).all() and np.isfinite(y).all()):
-        raise ValueError("Calibration inputs must be finite")
-    if ((p < 0) | (p > 1)).any() or (~np.isin(y, [0.0, 1.0])).any():
-        raise ValueError("Calibration requires probabilities in [0, 1] and binary outcomes")
+    p, y = _binary_forecasts(prob, outcome)
     if len(p) == 0:
         return []
+    # Assign each forecast once, including p=1 in the final bin.
+    # bincount avoids a full-array scan for every calibration bucket.
+    bucket = np.minimum((p * bins).astype(np.int64), bins - 1)
+    counts = np.bincount(bucket, minlength=bins)
+    probability_sums = np.bincount(bucket, weights=p, minlength=bins)
+    outcome_sums = np.bincount(bucket, weights=y, minlength=bins)
     edges = np.linspace(0, 1, bins + 1)
-    rows = []
-    for left, right in zip(edges[:-1], edges[1:]):
-        mask = (p >= left) & (p < right if right < 1 else p <= right)
-        if not mask.any():
-            continue
-        rows.append(
-            {
-                "bin_low": float(left),
-                "bin_high": float(right),
-                "n": int(mask.sum()),
-                "mean_prob": float(p[mask].mean()),
-                "frequency": float(y[mask].mean()),
-            }
-        )
-    return rows
+    return [
+        {
+            "bin_low": float(edges[i]),
+            "bin_high": float(edges[i + 1]),
+            "n": int(counts[i]),
+            "mean_prob": float(probability_sums[i] / counts[i]),
+            "frequency": float(outcome_sums[i] / counts[i]),
+        }
+        for i in range(bins)
+        if counts[i]
+    ]
 
 
 def closing_line_value(bet_implied, close_implied) -> float | None:
