@@ -68,11 +68,11 @@ def calibration_table(prob, outcome, bins: int = 8) -> list[dict]:
         return []
     # Assign each forecast once, including p=1 in the final bin.
     # bincount avoids a full-array scan for every calibration bucket.
-    bucket = np.minimum((p * bins).astype(np.int64), bins - 1)
+    edges = np.linspace(0, 1, bins + 1)
+    bucket = np.minimum(np.searchsorted(edges, p, side="right") - 1, bins - 1)
     counts = np.bincount(bucket, minlength=bins)
     probability_sums = np.bincount(bucket, weights=p, minlength=bins)
     outcome_sums = np.bincount(bucket, weights=y, minlength=bins)
-    edges = np.linspace(0, 1, bins + 1)
     return [
         {
             "bin_low": float(edges[i]),
