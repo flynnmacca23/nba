@@ -99,7 +99,11 @@ def closing_line_value(bet_implied, close_implied) -> float | None:
     valid = np.isfinite(bet) & np.isfinite(close)
     if np.isinf(bet).any() or np.isinf(close).any():
         raise ValueError("CLV implied probabilities cannot be infinite")
-    if ((bet[valid] < 0) | (bet[valid] > 1) | (close[valid] < 0) | (close[valid] > 1)).any():
+    # Validate each available quote independently: a missing counterpart must not
+    # hide a malformed recorded probability.
+    if ((bet[np.isfinite(bet)] < 0) | (bet[np.isfinite(bet)] > 1)).any() or (
+        (close[np.isfinite(close)] < 0) | (close[np.isfinite(close)] > 1)
+    ).any():
         raise ValueError("CLV implied probabilities must be in [0, 1]")
     if not valid.any():
         return None
