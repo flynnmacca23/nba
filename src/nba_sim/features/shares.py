@@ -346,10 +346,26 @@ def _previous_season(season: str) -> str:
 
 _MEASURED_CACHE: dict[tuple, dict[str, dict]] = {}
 _OFFENSE_SEASON: dict[tuple, pd.DataFrame] = {}
+# Retain source frames while their id-based cache keys are live. Without this,
+# Python can recycle a DataFrame id and return another game's cached rows.
+_CACHE_OWNERS: dict[int, pd.DataFrame] = {}
+
+
+def _track_cache_frame(frame: pd.DataFrame) -> None:
+    identity = id(frame)
+    if identity in _CACHE_OWNERS:
+        return
+    if len(_CACHE_OWNERS) >= 24:
+        _CACHE_OWNERS.clear()
+        _MEASURED_CACHE.clear()
+        _OFFENSE_SEASON.clear()
+    _CACHE_OWNERS[identity] = frame
 
 
 def _offense_season(play_types: pd.DataFrame, season: str) -> pd.DataFrame:
     """One normalized offensive player slice per season for Synergy lookups."""
+    if play_types is not None:
+        _track_cache_frame(play_types)
     key = (id(play_types), str(season))
     cached = _OFFENSE_SEASON.get(key)
     if cached is not None:
@@ -399,7 +415,7 @@ def _measured_with_prior(
             name,
             _previous_season(season),
             depth - 1,
-            role_flip=role_flip,
+            role_flip=False,  # No current-season evidence for a role change.
             current_weight=current_weight,
             solo_threshold=solo_threshold,
         )
@@ -439,8 +455,8 @@ def _measured_with_prior(
             "tov": mix("tov", 0.12),
             "ft": mix("ft", 0.08),
             "fg": mix("fg", 0.46),
-            # Count current games only so the clock sample ages with this season.
-            "gp": float(new.get("gp") or 0),
+            # Pool the exposure window across both seasons for per-game rates.
+            "gp": float(new.get("gp") or 0) + float(old.get("gp") or 0),
         }
     return pooled
 
@@ -449,6 +465,7 @@ def _measured_player(play_types: pd.DataFrame | None, name: str, season: str) ->
     if play_types is None or play_types.empty:
         return {}
     player_key = norm_person(name)
+    _track_cache_frame(play_types)
     cache_key = (id(play_types), str(season), player_key)
     cached = _MEASURED_CACHE.get(cache_key)
     if cached is not None:

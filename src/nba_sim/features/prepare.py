@@ -804,6 +804,7 @@ def _template_player(member: dict, team: TeamModel, league: LeaguePriors, minute
         dreb_pct=dreb,
         espn_id=espn_id,
         minutes_source="Depth chart",
+        foul_rate=0.08,
         minutes_base=minutes,
     )
 
@@ -1083,7 +1084,8 @@ def _hygiene_current_slate_minutes(players: list[PlayerModel], on: date) -> None
     """
     if not _is_current_slate(on):
         return
-    _cap_unsampled_minutes(players, cap=6.0)
+    if len(players) >= 5:
+        _cap_unsampled_minutes(players, cap=6.0)
     _rescale_available_to_240(players, only_if_over=280.0, protect_stars=True)
 
 
@@ -1431,7 +1433,7 @@ def _pos_stat_shares(
 
 
 # Ten games ties last season's dashboard. Fourteen games is this year's team.
-_TEAM_PRIOR = 10.0
+_TEAM_PRIOR = 14.0
 _TEAM_STAND = 14.0
 
 
@@ -2520,7 +2522,11 @@ def _chart_on_night(
             # After a team has STOD log appearances, drop chart-only phantoms
             # (no matched id / no stint). Opening night before any logs still
             # keeps the depth chart.
-            if team in teams_with_logs:
+            # Keep an unobserved chart player until there is evidence of a
+            # later stint elsewhere. A rookie may have no NBA log yet.
+            if player_id is not None and player_id in by_player:
+                continue
+            if player_id is None and team in teams_with_logs:
                 continue
             kept.append(row)
             continue

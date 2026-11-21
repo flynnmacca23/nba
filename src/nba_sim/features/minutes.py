@@ -100,12 +100,21 @@ def allocate_minutes(
 
     An unavailable player stays at zero. Everyone else absorbs that playing time.
     """
+    if isinstance(n_sims, (bool, np.bool_)) or not isinstance(n_sims, (int, np.integer)) or n_sims < 1:
+        raise ValueError("n_sims must be a positive integer")
+    if not np.isfinite(target) or target <= 0:
+        raise ValueError("target must be finite and positive")
+    if any(not np.isfinite(p.mean) or not np.isfinite(p.std) or p.mean < 0 or p.std < 0 for p in players):
+        raise ValueError("minute priors must be finite and nonnegative")
     if rng is None:
         rng = np.random.default_rng(seed)
     n = len(players)
     available = np.array([p.available for p in players], dtype=bool)
+    # Never resurrect injured/inactive players to fill an impossible slate.
+    # An all-out roster has no legal minutes allocation; return zero minutes
+    # rather than assigning 240 minutes to known absences.
     if not available.any():
-        available[:] = True
+        return np.zeros((n_sims, n), dtype=float)
     means = np.array(
         [p.mean if bool(available[i]) else 0.0 for i, p in enumerate(players)],
         dtype=float,
