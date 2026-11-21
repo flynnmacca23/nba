@@ -23,3 +23,13 @@ def test_drawdown_uses_running_high_water_mark():
 def test_drawdown_rejects_invalid_profit_series(profits):
     with pytest.raises(ValueError, match="Drawdown requires"):
         max_drawdown(profits)
+
+
+def test_drawdown_rejects_cumulative_overflow():
+    with pytest.raises(ValueError, match="cumulative equity"):
+        max_drawdown([1e308, 1e308])
+
+
+def test_drawdown_rejects_overflowing_peak_to_trough_distance():
+    with pytest.raises(ValueError, match="magnitude"):
+        max_drawdown([1e308, -1e308, -1e308])
