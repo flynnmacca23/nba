@@ -55,9 +55,15 @@ def max_drawdown(profits) -> float:
     if len(series) == 0:
         return 0.0
     # Include the initial bankroll: losing from the first bet is a drawdown.
-    equity = np.concatenate(([0.0], np.cumsum(series)))
-    peak = np.maximum.accumulate(equity)
-    return float(np.max(peak - equity))
+    with np.errstate(over="ignore", invalid="ignore"):
+        equity = np.concatenate(([0.0], np.cumsum(series)))
+        if not np.isfinite(equity).all():
+            raise ValueError("Drawdown cumulative equity must remain finite")
+        peak = np.maximum.accumulate(equity)
+        drawdowns = peak - equity
+        if not np.isfinite(drawdowns).all():
+            raise ValueError("Drawdown magnitude must remain finite")
+    return float(np.max(drawdowns))
 
 
 def calibration_table(prob, outcome, bins: int = 8) -> list[dict]:
