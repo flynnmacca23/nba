@@ -41,7 +41,11 @@ def fill_night(
     ``order_by`` is set, the fill walks that ranking instead of the noisy
     amounts, so a soft star draw cannot lose his slot to a hot bench draw.
     """
+    if not np.isfinite(target) or target <= 0:
+        raise ValueError("minute fill target must be finite and positive")
     values = np.asarray(means, dtype=float)
+    if values.ndim not in (1, 2) or not np.isfinite(values).all():
+        raise ValueError("minute fill means must be finite one- or two-dimensional values")
     single = values.ndim == 1
     if single:
         values = values.reshape(1, -1)
@@ -51,6 +55,8 @@ def fill_night(
         ranking = ranking.reshape(1, -1)
     if ranking.shape != values.shape:
         ranking = np.broadcast_to(ranking, values.shape)
+    if not np.isfinite(ranking).all():
+        raise ValueError("minute fill ranking must be finite")
     out = np.zeros_like(values)
     order = np.argsort(-ranking, axis=1, kind="stable")
     for row, indexes in enumerate(order):
