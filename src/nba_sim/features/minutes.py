@@ -84,6 +84,10 @@ def draw_night_minutes(
     number, and the refill walks the prior role order so a bench spike cannot
     steal a star's slot in the 240.
     """
+    if isinstance(n_sims, (bool, np.bool_)) or not isinstance(n_sims, (int, np.integer)) or n_sims < 1:
+        raise ValueError("n_sims must be a positive integer")
+    if any(not np.isfinite(p.mean) or not np.isfinite(p.std) or p.mean < 0 or p.std < 0 for p in players):
+        raise ValueError("minute priors must be finite and nonnegative")
     means = np.array([p.mean if p.available else 0.0 for p in players], dtype=float)
     stds = np.array([max(0.0, p.std) if p.available else 0.0 for p in players], dtype=float)
     if float(means.sum()) <= 0:
