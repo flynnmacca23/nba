@@ -140,7 +140,13 @@ def allocate_minutes(
     raw = np.clip(raw, 0.0, 46.0)
     raw[:, ~available] = 0.0
     totals = raw.sum(axis=1, keepdims=True)
-    totals = np.maximum(totals, 1e-6)
-    out = raw * (target / totals)
+    # A clipped draw can be entirely zero even with an active roster.
+    # Fall back to the active priors, not to injured players or a zero game.
+    empty = totals[:, 0] == 0.0
+    if empty.any():
+        weights = means / means.max()
+        raw[empty] = weights / weights.sum()
+        totals = raw.sum(axis=1, keepdims=True)
+    out = (raw / totals) * target
     out[:, ~available] = 0.0
     return out
