@@ -260,3 +260,19 @@ def test_allocate_minutes_rejects_invalid_target(target):
 def test_allocate_minutes_rejects_invalid_priors(mean, std):
     with pytest.raises(ValueError, match="priors"):
         allocate_minutes([MinutePlayer(1, mean, std, True)], n_sims=2)
+
+
+def test_allocate_minutes_preserves_totals_for_zero_and_tiny_draws():
+    class FixedRng:
+        def normal(self, means, stds, size):
+            assert size == (3, 3)
+            return np.array([[-1.0, -2.0, 40.0],
+                             [1e-12, 3e-12, 40.0],
+                             [20.0, 20.0, 40.0]])
+
+    players = [MinutePlayer(1, 30.0, 2.0, True),
+               MinutePlayer(2, 10.0, 2.0, True),
+               MinutePlayer(3, 40.0, 2.0, False)]
+    actual = allocate_minutes(players, n_sims=3, rng=FixedRng())
+    np.testing.assert_allclose(actual, [[180, 60, 0], [60, 180, 0], [120, 120, 0]])
+    np.testing.assert_allclose(actual.sum(axis=1), 240.0)
