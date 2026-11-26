@@ -276,3 +276,13 @@ def test_allocate_minutes_preserves_totals_for_zero_and_tiny_draws():
     actual = allocate_minutes(players, n_sims=3, rng=FixedRng())
     np.testing.assert_allclose(actual, [[180, 60, 0], [60, 180, 0], [120, 120, 0]])
     np.testing.assert_allclose(actual.sum(axis=1), 240.0)
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_minute_simulations_reject_duplicate_player_ids(available):
+    players = [MinutePlayer(1, 30.0, 2.0, True),
+               MinutePlayer(1, 20.0, 1.0, available)]
+    with pytest.raises(ValueError, match="IDs must be unique"):
+        allocate_minutes(players, n_sims=2, seed=1)
+    with pytest.raises(ValueError, match="IDs must be unique"):
+        draw_night_minutes(players, n_sims=2, rng=np.random.default_rng(1))
