@@ -230,3 +230,59 @@ def test_recent_fg_multiplier_tracks_cold_scoring_per_fga():
     mult, n = _recent_fg_multiplier(pd.DataFrame(rows), 7, season_eff=1.5, season="2026-27")
     assert n == 10
     assert mult < 0.95
+
+
+def test_all_unavailable_roster_never_resurrects_injured_players():
+    players = [MinutePlayer(i, 30.0, 2.0, False) for i in range(8)]
+    minutes = allocate_minutes(players, n_sims=20, seed=3)
+    assert minutes.shape == (20, 8)
+    np.testing.assert_array_equal(minutes, np.zeros((20, 8)))
+
+
+def test_empty_roster_has_zero_minutes_without_division_by_zero():
+    minutes = allocate_minutes([], n_sims=4, seed=1)
+    assert minutes.shape == (4, 0)
+
+
+@pytest.mark.parametrize("n_sims", [0, -1, 1.5, True])
+def test_allocate_minutes_rejects_invalid_simulation_counts(n_sims):
+    with pytest.raises(ValueError, match="n_sims"):
+        allocate_minutes([MinutePlayer(1, 30.0, 2.0, True)], n_sims=n_sims)
+
+
+@pytest.mark.parametrize("target", [0, -240, float("nan"), float("inf")])
+def test_allocate_minutes_rejects_invalid_target(target):
+    with pytest.raises(ValueError, match="target"):
+        allocate_minutes([MinutePlayer(1, 30.0, 2.0, True)], n_sims=2, target=target)
+
+
+@pytest.mark.parametrize("mean,std", [(float("nan"), 1), (30, float("inf")), (-1, 1), (30, -1)])
+def test_allocate_minutes_rejects_invalid_priors(mean, std):
+    with pytest.raises(ValueError, match="priors"):
+        allocate_minutes([MinutePlayer(1, mean, std, True)], n_sims=2)
+
+
+def test_allocate_minutes_preserves_totals_for_zero_and_tiny_draws():
+    class FixedRng:
+        def normal(self, means, stds, size):
+            assert size == (3, 3)
+            return np.array([[-1.0, -2.0, 40.0],
+                             [1e-12, 3e-12, 40.0],
+                             [20.0, 20.0, 40.0]])
+
+    players = [MinutePlayer(1, 30.0, 2.0, True),
+               MinutePlayer(2, 10.0, 2.0, True),
+               MinutePlayer(3, 40.0, 2.0, False)]
+    actual = allocate_minutes(players, n_sims=3, rng=FixedRng())
+    np.testing.assert_allclose(actual, [[180, 60, 0], [60, 180, 0], [120, 120, 0]])
+    np.testing.assert_allclose(actual.sum(axis=1), 240.0)
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_minute_simulations_reject_duplicate_player_ids(available):
+    players = [MinutePlayer(1, 30.0, 2.0, True),
+               MinutePlayer(1, 20.0, 1.0, available)]
+    with pytest.raises(ValueError, match="IDs must be unique"):
+        allocate_minutes(players, n_sims=2, seed=1)
+    with pytest.raises(ValueError, match="IDs must be unique"):
+        draw_night_minutes(players, n_sims=2, rng=np.random.default_rng(1))

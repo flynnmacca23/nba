@@ -41,7 +41,11 @@ def fill_night(
     ``order_by`` is set, the fill walks that ranking instead of the noisy
     amounts, so a soft star draw cannot lose his slot to a hot bench draw.
     """
+    if not np.isfinite(target) or target <= 0:
+        raise ValueError("minute fill target must be finite and positive")
     values = np.asarray(means, dtype=float)
+    if values.ndim not in (1, 2) or not np.isfinite(values).all():
+        raise ValueError("minute fill means must be finite one- or two-dimensional values")
     single = values.ndim == 1
     if single:
         values = values.reshape(1, -1)
@@ -51,6 +55,8 @@ def fill_night(
         ranking = ranking.reshape(1, -1)
     if ranking.shape != values.shape:
         ranking = np.broadcast_to(ranking, values.shape)
+    if not np.isfinite(ranking).all():
+        raise ValueError("minute fill ranking must be finite")
     out = np.zeros_like(values)
     order = np.argsort(-ranking, axis=1, kind="stable")
     for row, indexes in enumerate(order):
@@ -78,6 +84,12 @@ def draw_night_minutes(
     number, and the refill walks the prior role order so a bench spike cannot
     steal a star's slot in the 240.
     """
+    if isinstance(n_sims, (bool, np.bool_)) or not isinstance(n_sims, (int, np.integer)) or n_sims < 1:
+        raise ValueError("n_sims must be a positive integer")
+    if len({p.player_id for p in players}) != len(players):
+        raise ValueError("minute player IDs must be unique")
+    if any(not np.isfinite(p.mean) or not np.isfinite(p.std) or p.mean < 0 or p.std < 0 for p in players):
+        raise ValueError("minute priors must be finite and nonnegative")
     means = np.array([p.mean if p.available else 0.0 for p in players], dtype=float)
     stds = np.array([max(0.0, p.std) if p.available else 0.0 for p in players], dtype=float)
     if float(means.sum()) <= 0:
@@ -100,12 +112,23 @@ def allocate_minutes(
 
     An unavailable player stays at zero. Everyone else absorbs that playing time.
     """
+    if isinstance(n_sims, (bool, np.bool_)) or not isinstance(n_sims, (int, np.integer)) or n_sims < 1:
+        raise ValueError("n_sims must be a positive integer")
+    if not np.isfinite(target) or target <= 0:
+        raise ValueError("target must be finite and positive")
+    if len({p.player_id for p in players}) != len(players):
+        raise ValueError("minute player IDs must be unique")
+    if any(not np.isfinite(p.mean) or not np.isfinite(p.std) or p.mean < 0 or p.std < 0 for p in players):
+        raise ValueError("minute priors must be finite and nonnegative")
     if rng is None:
         rng = np.random.default_rng(seed)
     n = len(players)
     available = np.array([p.available for p in players], dtype=bool)
+    # Never resurrect injured/inactive players to fill an impossible slate.
+    # An all-out roster has no legal minutes allocation; return zero minutes
+    # rather than assigning 240 minutes to known absences.
     if not available.any():
-        available[:] = True
+        return np.zeros((n_sims, n), dtype=float)
     means = np.array(
         [p.mean if bool(available[i]) else 0.0 for i, p in enumerate(players)],
         dtype=float,
@@ -121,7 +144,13 @@ def allocate_minutes(
     raw = np.clip(raw, 0.0, 46.0)
     raw[:, ~available] = 0.0
     totals = raw.sum(axis=1, keepdims=True)
-    totals = np.maximum(totals, 1e-6)
-    out = raw * (target / totals)
+    # A clipped draw can be entirely zero even with an active roster.
+    # Fall back to the active priors, not to injured players or a zero game.
+    empty = totals[:, 0] == 0.0
+    if empty.any():
+        weights = means / means.max()
+        raw[empty] = weights / weights.sum()
+        totals = raw.sum(axis=1, keepdims=True)
+    out = (raw / totals) * target
     out[:, ~available] = 0.0
     return out
